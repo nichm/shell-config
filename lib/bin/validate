@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 🔍 VALIDATE CLI - Standalone Validation Tool
+# =============================================================================
+# Manual validation tool that works without git context.
+# Provides JSON output for CI/CD and AI agent integration.
+# Usage:
+#   validate file.py
+#   validate --json file.py
+#   validate --parallel 4 src/
+#   validate --all src/
+#   validate --syntax file.sh
+#   validate --security config/
+# Features:
+# - Works without git context
+# - JSON output for CI/CD pipelines
+# - Parallel execution for batch validation
+# - Directory traversal
+# - Selective validation (syntax, security, etc.)
+# =============================================================================
+
+set -uo pipefail
+
+# =============================================================================
+# FIND DIRECTORIES
+# =============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ -n "${SHELL_CONFIG_DIR:-}" ]]; then
+    VALIDATION_DIR="$SHELL_CONFIG_DIR/lib/validation"
+else
+    # Navigate to shell-config root from lib/bin/
+    VALIDATION_DIR="$(cd "${SCRIPT_DIR}/../validation" && pwd)"
+fi
+
+# =============================================================================
+# SOURCE VALIDATION API
+# =============================================================================
+
+if [[ -f "${VALIDATION_DIR}/api.sh" ]]; then
+    # shellcheck source=lib/validation/api.sh
+    source "${VALIDATION_DIR}/api.sh"
+else
+    echo "❌ ERROR: Validation API not found" >&2
+    echo "   Expected: ${VALIDATION_DIR}/api.sh" >&2
+    exit 2
+fi
+
+# =============================================================================
+# USAGE
+# =============================================================================
+
+show_help() {
+    cat <<'EOF'
+🔍 VALIDATE - Standalone Validation Tool
+
+USAGE:
+  validate [OPTIONS] <file|directory> [...]
+
+OPTIONS:
+  --json              Output results as JSON (for CI/CD and AI agents)
+  --parallel <N>      Run N validations in parallel (default: 0 = sequential)
+  --all               Validate all files in directory (recursive)
+  --syntax            Validate syntax only
+  --security          Validate security checks only
+  --help              Show this help message
+
+EXAMPLES:
+  # Validate single file
+  validate file.py
+
+  # JSON output for CI/CD
+  validate --json file.py
+
+  # Parallel validation
+  validate --parallel 4 src/
+
+  # Validate entire directory
+  validate --all src/
+
+  # Specific validation types
+  validate --syntax file.sh
+  validate --security config/
+
+EXIT CODES:
+  0 - All validations passed
+  1 - One or more validations failed
+  2 - Error in execution (missing deps, invalid args)
+
+INTEGRATION:
+  The validator API supports multiple output formats:
+  - Console: Human-readable results with colors
+  - JSON: Machine-readable for CI/CD and AI agents
+
+  For batch validation with multiple files, use --parallel for speed.
+
+EOF
+}
+
+# =============================================================================
+# PARSE ARGUMENTS
+# =============================================================================
+
+parse_args() {
+    FILES=()
+    MODE="all"
+    VALIDATOR_OUTPUT="console"
+    VALIDATOR_PARALLEL=0
+    VALIDATOR_OUTPUT_FILE=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        --json)
+            VALIDATOR_OUTPUT="json"
+            shift
+            ;;
+        --parallel)
+            if [[ $# -lt 2 ]] || [[ "$2" == -* ]]; then
+                echo "Error: --parallel requires a numeric argument" >&2
+                echo "Usage: validate --parallel <N> <files>" >&2
+                exit 2
+            fi
+            VALIDATOR_PARALLEL="$2"
+            shift 2
+            ;;
+        --all)
+            MODE="all"
+            shift
+            ;;
+        --syntax)
+            MODE="syntax"
+            shift
+            ;;
+        --security)
+            MODE="security"
+            shift
+            ;;
+        --help | -h)
+            show_help
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            echo "Run: validate --help" >&2
+            exit 2
+            ;;
+        *)
+            FILES+=("$1")
+            shift
+            ;;
+        esac
+    done
+}
+
+# =============================================================================
+# COLLECT FILES
+# =============================================================================
+
+collect_files() {
+    local targets=("$@")
+    local files=()
+
+    local errors=()
+
+    for target in "${targets[@]}"; do
+        if [[ -f "$target" ]]; then
+            # Single file - use ./ prefix to prevent argument injection
+            files+=("./$target")
+        elif [[ -d "$target" ]]; then
+            # Directory - collect files recursively
+            if [[ "$MODE" == "all" ]]; then
+                # Use ./ prefix to prevent argument injection if target starts with -
+                while IFS= read -r file; do
+                    [[ -f "$file" ]] && files+=("$file")
+                done < <(find "./$target" -type f 2>/dev/null)
+            else
+                errors+=("Directory requires --all flag: $target (try: validate --all $target)")
+            fi
+        else
+            errors+=("Not found: $target")
+        fi
+    done
+
+    # Report all errors at the end
+    if [[ ${#errors[@]} -gt 0 ]]; then
+        for err in "${errors[@]}"; do
+            echo "Error: $err" >&2
+        done
+        exit 2
+    fi
+
+    printf '%s\n' "${files[@]}"
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+main() {
+    # Parse arguments
+    parse_args "$@"
+
+    # Check if files provided
+    if [[ ${#FILES[@]} -eq 0 ]]; then
+        echo "Error: No files specified" >&2
+        echo "Run: validate --help" >&2
+        exit 2
+    fi
+
+    # Collect files (handles directories)
+    local files=()
+    while IFS= read -r file; do
+        [[ -n "$file" ]] && files+=("$file")
+    done < <(collect_files "${FILES[@]}")
+
+    if [[ ${#files[@]} -eq 0 ]]; then
+        echo "Error: No files found" >&2
+        exit 2
+    fi
+
+    # Export configuration for validator API
+    export VALIDATOR_OUTPUT
+    export VALIDATOR_PARALLEL
+    export VALIDATOR_OUTPUT_FILE
+
+    # Run validation
+    validator_api_run "${files[@]}"
+    local exit_code=$?
+
+    # If JSON mode and no output file specified, print to stdout
+    if [[ "$VALIDATOR_OUTPUT" == "json" ]] && [[ -z "$VALIDATOR_OUTPUT_FILE" ]]; then
+        validator_api_get_results
+    fi
+
+    exit $exit_code
+}
+
+# =============================================================================
+# RUN
+# =============================================================================
+
+main "$@"

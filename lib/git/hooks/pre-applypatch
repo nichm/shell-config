@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 🔍 PRE-APPLYPATCH HOOK - Validate Patch Before Applying
+# =============================================================================
+# Runs after git am (apply mailbox patches) but before committing.
+# Validates the patch to prevent applying problematic changes.
+# Checks:
+#   1. Scan for secrets in the patch
+#   2. Validate patch format
+#   3. Check for suspicious patterns
+# Bypass: git am --no-verify
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Source hook bootstrap (environment setup)
+# =============================================================================
+# Resolve symlinks so relative paths work from installed (~/.githooks/) location
+# shellcheck source=../shared/hook-bootstrap.sh
+_hook_real="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+source "$(dirname "$_hook_real")/../shared/hook-bootstrap.sh"
+unset _hook_real
+
+# =============================================================================
+# VALIDATION FUNCTIONS
+# =============================================================================
+
+# Check if patch file contains suspicious patterns
+check_patch_patterns() {
+    local patch_file="$1"
+    local found_issues=0
+
+    # Check for merge conflict markers in patch
+    # Standard Git conflict markers: <<<<<<< ======= >>>>>>> (7 chars each)
+    if grep -qE '^(<<<<<<< |======= |>>>>>>> )' "$patch_file" 2>/dev/null; then
+        echo -e "${RED}❌ ERROR: Patch contains merge conflict markers${NC}" >&2
+        echo "WHY: Applying patches with unresolved conflicts causes repository corruption" >&2
+        echo "FIX: Resolve conflicts in the patch before applying" >&2
+        found_issues=1
+    fi
+
+    return $found_issues
+}
+
+# Check for sensitive file additions in patch
+check_sensitive_files() {
+    local patch_file="$1"
+    local found_issues=0
+
+    # List of sensitive filename patterns to check
+    local sensitive_patterns=(
+        '\.env$'
+        '\.env\.'
+        '\.pem$'
+        '\.key$'
+        '\.crt$'
+        'credentials\.json$'
+        'credentials\.yml$'
+        'credentials\.yaml$'
+        'secret\.json$'
+        'secret\.yml$'
+        'secret\.yaml$'
+        'passwords\.txt$'
+        '\.aws/credentials'
+        'id_rsa$'
+        'id_ed25519$'
+    )
+
+    # Extract added filenames from patch
+    local added_files
+    added_files=$(grep -a '^+++ ' "$patch_file" 2>/dev/null | sed 's/^+++ b\///' || true)
+
+    for pattern in "${sensitive_patterns[@]}"; do
+        if echo "$added_files" | grep -qE "$pattern"; then
+            echo -e "${YELLOW}⚠️  WARNING: Patch adds sensitive file matching: $pattern${NC}" >&2
+            echo "WHY: Sensitive files like credentials should not be committed" >&2
+            echo "FIX: Remove the sensitive file from the patch or use environment variables" >&2
+            found_issues=1
+        fi
+    done
+
+    return $found_issues
+}
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+main() {
+    # The patch file is passed as the first argument
+    local patch_file="$1"
+
+    if [[ ! -f "$patch_file" ]]; then
+        echo -e "${YELLOW}⚠️  WARNING: Patch file not found: $patch_file${NC}" >&2
+        exit 0
+    fi
+
+    echo -e "${BLUE}🔍 Validating patch: $patch_file${NC}" >&2
+
+    local validation_failed=0
+
+    # =============================================================================
+    # 1. Check for merge conflict markers
+    # =============================================================================
+    if ! check_patch_patterns "$patch_file"; then
+        validation_failed=1
+    fi
+
+    # =============================================================================
+    # 2. Check for sensitive files
+    # =============================================================================
+    if ! check_sensitive_files "$patch_file"; then
+        validation_failed=1
+    fi
+
+    # =============================================================================
+    # 3. Scan for secrets using Gitleaks (if available)
+    # =============================================================================
+    if command_exists "gitleaks"; then
+        echo -e "${BLUE}🔍 Scanning patch for secrets...${NC}" >&2
+
+        # Get gitleaks config
+        local gitleaks_config="${SHELL_CONFIG_DIR}/lib/validation/validators/security/config/gitleaks.toml"
+
+        # Scan the patch file for secrets
+        local gitleaks_cmd=(gitleaks detect --no-git)
+        if [[ -f "$gitleaks_config" ]]; then
+            gitleaks_cmd+=(--config "$gitleaks_config")
+        fi
+
+        # Use timeout to prevent hanging
+        if ! _portable_timeout "${GITLEAKS_TIMEOUT:-5}" "${gitleaks_cmd[@]}" "$patch_file" >/dev/null 2>&1; then
+            echo -e "${RED}❌ ERROR: Patch contains potential secrets${NC}" >&2
+            echo "WHY: Applying patches with secrets compromises security" >&2
+            echo "FIX: Remove secrets from the patch before applying" >&2
+            echo "     Run: gitleaks detect --no-git $patch_file" >&2
+            validation_failed=1
+        else
+            echo -e "${GREEN}✅ No secrets detected in patch${NC}" >&2
+        fi
+    fi
+
+    # =============================================================================
+    # Final decision
+    # =============================================================================
+    if [[ $validation_failed -ne 0 ]]; then
+        echo "" >&2
+        echo -e "${RED}❌ ERROR: Patch validation failed${NC}" >&2
+        echo "WHY: Applying this patch could introduce security risks or repository corruption" >&2
+        echo "FIX: Review and fix the issues above, or bypass with: git am --no-verify" >&2
+        exit 1
+    fi
+
+    echo -e "${GREEN}✅ Patch validation passed${NC}" >&2
+    exit 0
+}
+
+# Run main function
+main "$@"

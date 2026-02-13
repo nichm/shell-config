@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# =============================================================================
+# ✨ PREPARE-COMMIT-MSG HOOK - Auto-Generate Commit Message Prefix
+# =============================================================================
+# Runs after commit message template is loaded, before editor opens.
+# Automatically prepends conventional commit prefix based on branch name.
+# Examples:
+#   Branch: feat/add-login         → Prepends: "feat: "
+#   Branch: fix/123-broken-auth    → Prepends: "fix(#123): "
+#   Branch: chore/update-deps      → Prepends: "chore: "
+# Enable: GIT_AUTO_BRANCH_PREFIX=1 git commit
+# Disable for single commit: GIT_AUTO_BRANCH_PREFIX=0 git commit
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Source hook bootstrap (environment setup)
+# =============================================================================
+# Resolve symlinks so relative paths work from installed (~/.githooks/) location
+# shellcheck source=../shared/hook-bootstrap.sh
+_hook_real="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+source "$(dirname "$_hook_real")/../shared/hook-bootstrap.sh"
+unset _hook_real
+
+# Source git-utils for commit message utilities
+source "$SHARED_DIR/git-utils.sh"
+
+# Configuration
+AUTO_PREFIX="${GIT_AUTO_BRANCH_PREFIX:-0}"
+# ISSUE_NUMBER_PATTERN reserved for future custom issue number patterns
+# shellcheck disable=SC2034 # Reserved for future use
+ISSUE_NUMBER_PATTERN="${GIT_ISSUE_NUMBER_PATTERN:-[0-9]+}"
+
+# Check if auto-prefix is enabled
+if [[ "$AUTO_PREFIX" != "1" ]]; then
+    exit 0
+fi
+
+# Get commit message file path
+commit_msg_file="$1"
+commit_source="${2:-}" # message, template, merge, squash, or commit
+# shellcheck disable=SC2034 # Stored for potential future use in enhanced commit processing
+commit_sha="${3:-}" # Only for commit source
+
+# Skip for merge commits (git generates message automatically)
+if [[ "$commit_source" == "merge" ]]; then
+    exit 0
+fi
+
+# Skip if commit message already has content (not just template/comments)
+current_msg=$(grep -v '^[[:space:]]*#' "$commit_msg_file" | grep -v '^[[:space:]]*$' || true)
+if [[ -n "$current_msg" ]] && [[ "$commit_source" != "template" ]]; then
+    exit 0
+fi
+
+# Get current branch name
+branch_name=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+
+if [[ -z "$branch_name" ]]; then
+    # Detached HEAD - no branch to parse
+    exit 0
+fi
+
+# =============================================================================
+# Parse branch name for conventional commit type and issue number
+# =============================================================================
+
+# Supported branch patterns:
+#   type/description        → "type: "
+#   type/issue-description  → "type(#issue): "
+#   type/issue/description  → "type(#issue): "
+#   issue-type-description  → "type(#issue): "
+
+# Extract type from branch name (first segment before / or -)
+commit_type=""
+issue_number=""
+
+# Pattern 1: type/issue-description or type/issue/description
+if [[ "$branch_name" =~ ^([a-z]+)/([0-9]+)(-.+)?$ ]]; then
+    commit_type="${BASH_REMATCH[1]}"
+    issue_number="${BASH_REMATCH[2]}"
+# Pattern 2: type-description (no slash)
+elif [[ "$branch_name" =~ ^([a-z]+)-([0-9]+)- ]]; then
+    commit_type="${BASH_REMATCH[1]}"
+    issue_number="${BASH_REMATCH[2]}"
+# Pattern 3: type/description (no issue number)
+elif [[ "$branch_name" =~ ^([a-z]+)/ ]]; then
+    commit_type="${BASH_REMATCH[1]}"
+# Pattern 4: type-description (no issue number)
+elif [[ "$branch_name" =~ ^([a-z]+)- ]]; then
+    commit_type="${BASH_REMATCH[1]}"
+fi
+
+# Validate commit type against conventional commits list
+# Check if extracted type is valid
+if ! is_valid_conventional_type "$commit_type"; then
+    # Branch doesn't start with a valid conventional commit type
+    exit 0
+fi
+
+# =============================================================================
+# Build commit message prefix
+# =============================================================================
+
+# Start with type
+prefix="$commit_type"
+
+# Add issue number in scope if found
+if [[ -n "$issue_number" ]]; then
+    prefix="$prefix(#$issue_number)"
+fi
+
+# Add colon and space
+prefix="$prefix: "
+
+# =============================================================================
+# Check if commit message already starts with prefix
+# =============================================================================
+
+first_line=$(head -1 "$commit_msg_file" | grep -v '^[[:space:]]*#' || true)
+
+# Skip if message already starts with type: pattern
+if [[ "$first_line" =~ ^[a-z]+\(#?[0-9]*\): ]]; then
+    exit 0
+fi
+
+# =============================================================================
+# Prepend prefix to commit message file
+# =============================================================================
+
+# Create temporary file with new content
+temp_file=$(mktemp)
+trap 'rm -f "$temp_file"' EXIT INT TERM
+echo -n "$prefix" >"$temp_file"
+cat "$commit_msg_file" >>"$temp_file"
+
+# Replace original file
+mv "$temp_file" "$commit_msg_file"
+
+# Log what happened (so user knows the prefix was added)
+if [[ -n "$issue_number" ]]; then
+    log_info "Auto-prepended commit prefix: ${commit_type}(#${issue_number}): "
+else
+    log_info "Auto-prepended commit prefix: ${commit_type}: "
+fi
+
+exit 0

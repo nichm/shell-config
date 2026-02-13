@@ -1,0 +1,469 @@
+# =============================================================================
+# GITLEAKS CONFIGURATION - Secret Detection Rules
+# =============================================================================
+# Migrated from git-secrets patterns (2026-01-30)
+# This configuration provides 5x faster scanning than git-secrets
+# =============================================================================
+# Usage: gitleaks protect --staged --config gitleaks.toml
+# Docs: https://github.com/zricethezav/gitleaks
+# =============================================================================
+
+title = "Shell-Config Gitleaks Configuration"
+
+# =============================================================================
+# EXTEND DEFAULT RULES
+# =============================================================================
+[extend]
+# Use default gitleaks rules as baseline (600+ patterns)
+useDefault = true
+
+# =============================================================================
+# CUSTOM RULES - AI Provider API Keys
+# =============================================================================
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API Key (sk-...)"
+regex = '''sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}'''
+keywords = ["sk-"]
+tags = ["key", "OpenAI"]
+
+[[rules]]
+id = "openai-project-key"
+description = "OpenAI Project API Key"
+regex = '''sk-proj-[a-zA-Z0-9_-]{48,}'''
+keywords = ["sk-proj-"]
+tags = ["key", "OpenAI"]
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API Key"
+regex = '''sk-ant-[a-zA-Z0-9_-]{95,}'''
+keywords = ["sk-ant-"]
+tags = ["key", "Anthropic"]
+
+[[rules]]
+id = "openrouter-api-key"
+description = "OpenRouter API Key"
+regex = '''sk-or-[a-zA-Z0-9_-]{40,}'''
+keywords = ["sk-or-"]
+tags = ["key", "OpenRouter"]
+
+[[rules]]
+id = "groq-api-key"
+description = "Groq API Key"
+regex = '''gsk_[a-zA-Z0-9]{52}'''
+keywords = ["gsk_"]
+tags = ["key", "Groq"]
+
+[[rules]]
+id = "mistral-api-key"
+description = "Mistral AI API Key"
+regex = '''[a-zA-Z0-9]{32}:fx'''
+keywords = ["mistral"]
+tags = ["key", "Mistral"]
+
+[[rules]]
+id = "perplexity-api-key"
+description = "Perplexity API Key"
+regex = '''pplx-[a-zA-Z0-9]{48}'''
+keywords = ["pplx-"]
+tags = ["key", "Perplexity"]
+
+[[rules]]
+id = "deepseek-api-key"
+description = "DeepSeek API Key"
+regex = '''sk-[a-zA-Z0-9]{48}'''
+keywords = ["deepseek"]
+tags = ["key", "DeepSeek"]
+
+[[rules]]
+id = "huggingface-token"
+description = "Hugging Face Token"
+regex = '''hf_[a-zA-Z0-9]{34}'''
+keywords = ["hf_"]
+tags = ["key", "HuggingFace"]
+
+[[rules]]
+id = "replicate-token"
+description = "Replicate API Token"
+regex = '''r8_[a-zA-Z0-9]{40}'''
+keywords = ["r8_"]
+tags = ["key", "Replicate"]
+
+# =============================================================================
+# CLOUD PROVIDER KEYS
+# =============================================================================
+
+[[rules]]
+id = "digitalocean-token"
+description = "DigitalOcean Token"
+regex = '''dop_v1_[a-f0-9]{64}'''
+keywords = ["dop_v1_"]
+tags = ["key", "DigitalOcean"]
+
+[[rules]]
+id = "supabase-key"
+description = "Supabase Key"
+regex = '''sbp_[a-f0-9]{40}'''
+keywords = ["sbp_"]
+tags = ["key", "Supabase"]
+
+[[rules]]
+id = "firebase-key"
+description = "Firebase Cloud Messaging Server Key"
+regex = '''AAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}'''
+tags = ["key", "Firebase"]
+
+# =============================================================================
+# PAYMENT PROVIDERS
+# =============================================================================
+
+[[rules]]
+id = "stripe-live-key"
+description = "Stripe Live API Key"
+regex = '''sk_live_[0-9a-zA-Z]{24,99}|pk_live_[0-9a-zA-Z]{24,99}|rk_live_[0-9a-zA-Z]{24,99}'''
+keywords = ["sk_live_", "pk_live_", "rk_live_"]
+tags = ["key", "Stripe"]
+
+[[rules]]
+id = "stripe-webhook"
+description = "Stripe Webhook Secret"
+regex = '''whsec_[a-zA-Z0-9]{32}'''
+keywords = ["whsec_"]
+tags = ["secret", "Stripe"]
+
+# =============================================================================
+# COMMUNICATION SERVICES
+# =============================================================================
+
+[[rules]]
+id = "sendgrid-key"
+description = "SendGrid API Key"
+regex = '''SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}'''
+keywords = ["SG."]
+tags = ["key", "SendGrid"]
+
+[[rules]]
+id = "mailchimp-key"
+description = "Mailchimp API Key"
+regex = '''[a-f0-9]{32}-us[0-9]{1,2}'''
+tags = ["key", "Mailchimp"]
+
+[[rules]]
+id = "twilio-sid"
+description = "Twilio Account SID"
+regex = '''AC[a-f0-9]{32}'''
+keywords = ["AC"]
+tags = ["key", "Twilio"]
+
+# =============================================================================
+# MESSAGING PLATFORMS
+# =============================================================================
+
+[[rules]]
+id = "slack-token"
+description = "Slack Token"
+regex = '''xox[baprs]-[0-9]{10,12}-[0-9]{10,12}(-[0-9]{10,12})?-[a-zA-Z0-9]{24,}'''
+keywords = ["xoxb-", "xoxp-", "xoxa-", "xoxr-", "xoxs-"]
+tags = ["token", "Slack"]
+
+[[rules]]
+id = "slack-webhook"
+description = "Slack Webhook URL"
+regex = '''https://hooks\.slack\.com/services/T[A-Z0-9]{8,}/B[A-Z0-9]{8,}/[a-zA-Z0-9]{24}'''
+tags = ["webhook", "Slack"]
+
+[[rules]]
+id = "discord-token"
+description = "Discord Bot Token"
+regex = '''[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27,}'''
+tags = ["token", "Discord"]
+
+[[rules]]
+id = "telegram-token"
+description = "Telegram Bot Token"
+regex = '''[0-9]{8,10}:[a-zA-Z0-9_-]{35}'''
+tags = ["token", "Telegram"]
+
+# =============================================================================
+# DEVELOPER TOOLS
+# =============================================================================
+
+[[rules]]
+id = "npm-token"
+description = "npm Token"
+regex = '''npm_[a-zA-Z0-9]{36}'''
+keywords = ["npm_"]
+tags = ["token", "npm"]
+
+[[rules]]
+id = "pypi-token"
+description = "PyPI Token"
+regex = '''pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}'''
+keywords = ["pypi-"]
+tags = ["token", "PyPI"]
+
+# =============================================================================
+# PRIVATE KEYS
+# =============================================================================
+
+[[rules]]
+id = "rsa-private-key"
+description = "RSA Private Key"
+regex = '''-----BEGIN RSA PRIVATE KEY-----'''
+tags = ["key", "RSA"]
+
+[[rules]]
+id = "private-key"
+description = "Private Key"
+regex = '''-----BEGIN PRIVATE KEY-----'''
+tags = ["key", "PKCS"]
+
+[[rules]]
+id = "openssh-private-key"
+description = "OpenSSH Private Key"
+regex = '''-----BEGIN OPENSSH PRIVATE KEY-----'''
+tags = ["key", "OpenSSH"]
+
+[[rules]]
+id = "pgp-private-key"
+description = "PGP Private Key"
+regex = '''-----BEGIN PGP PRIVATE KEY BLOCK-----'''
+tags = ["key", "PGP"]
+
+# =============================================================================
+# DATABASE CREDENTIALS
+# =============================================================================
+
+[[rules]]
+id = "mongodb-uri"
+description = "MongoDB Connection String with Credentials"
+regex = '''mongodb(\+srv)?://[^:]+:[^@]+@[^/\s]+'''
+tags = ["database", "MongoDB"]
+
+[[rules]]
+id = "postgres-uri"
+description = "PostgreSQL Connection String with Credentials"
+regex = '''postgres(ql)?://[^:]+:[^@]+@[^/\s]+'''
+tags = ["database", "PostgreSQL"]
+
+[[rules]]
+id = "mysql-uri"
+description = "MySQL Connection String with Credentials"
+regex = '''mysql://[^:]+:[^@]+@[^/\s]+'''
+tags = ["database", "MySQL"]
+
+[[rules]]
+id = "redis-uri"
+description = "Redis URL with Credentials"
+regex = '''redis(s)?://[^:]+:[^@]+@[^/\s]+'''
+tags = ["database", "Redis"]
+
+# =============================================================================
+# GENERIC SECRET PATTERNS
+# =============================================================================
+
+[[rules]]
+id = "generic-password"
+description = "Generic Password Assignment"
+regex = '''(?i)(password|passwd|pwd)\s*[:=]\s*['"][^'"]{8,}['"]'''
+tags = ["secret", "generic"]
+
+[[rules]]
+id = "generic-api-key"
+description = "API Key Assignment"
+regex = '''(?i)api[_-]?key\s*[:=]\s*['"]?[A-Za-z0-9_\-]{32,}['"]?'''
+tags = ["key", "generic"]
+
+[[rules]]
+id = "generic-secret-key"
+description = "Secret Key Assignment"
+regex = '''(?i)secret[_-]?key\s*[:=]\s*['"]?[A-Za-z0-9_\-]{32,}['"]?'''
+tags = ["secret", "generic"]
+
+[[rules]]
+id = "bearer-token"
+description = "Bearer Token"
+regex = '''(?i)bearer\s+[a-zA-Z0-9_\-\.]{20,}'''
+tags = ["token", "generic"]
+
+# =============================================================================
+# ADDITIONAL SERVICES
+# =============================================================================
+
+[[rules]]
+id = "newrelic-key"
+description = "New Relic License Key"
+regex = '''NRAK-[A-Z0-9]{27}'''
+keywords = ["NRAK-"]
+tags = ["key", "NewRelic"]
+
+[[rules]]
+id = "sentry-dsn"
+description = "Sentry DSN"
+regex = '''https://[a-f0-9]{32}@[^/]+\.ingest\.sentry\.io/[0-9]+'''
+tags = ["dsn", "Sentry"]
+
+[[rules]]
+id = "launchdarkly-key"
+description = "LaunchDarkly SDK Key"
+regex = '''sdk-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}'''
+keywords = ["sdk-"]
+tags = ["key", "LaunchDarkly"]
+
+[[rules]]
+id = "mapbox-token"
+description = "Mapbox Access Token"
+regex = '''pk\.[a-zA-Z0-9_-]{60,}|sk\.[a-zA-Z0-9_-]{60,}'''
+keywords = ["pk.", "sk."]
+tags = ["key", "Mapbox"]
+
+# =============================================================================
+# ALLOWLISTS (False Positive Exceptions)
+# =============================================================================
+
+[allowlist]
+description = "Global allowlist for false positives"
+
+# Allowlisted paths
+paths = [
+    '''\.example$''',
+    '''\.template$''',
+    '''\.sample$''',
+    '''\.test$''',
+    '''/tests/''',
+    '''^tests/''',
+    '''\.bats$''',
+    '''/test/''',
+    '''/spec/''',
+    '''/fixtures/''',
+    '''/node_modules/''',
+    '''/vendor/''',
+    '''/\.git/''',
+    # Documentation files with example secrets
+    '''docs/git-secrets-complete-guide\.md$''',
+    '''docs/OPENGREP_FAQ\.md$''',
+    # Build artifacts (binary files)
+    '''/target/debug/''',
+    '''/target/release/''',
+    '''\.rmeta$''',
+    '''\.rlib$''',
+    '''\.so$''',
+    '''\.dylib$''',
+    # Secret detection pattern files (contain patterns to detect, not actual secrets)
+    '''lib/validation/validators/security/config/gitleaks\.toml$''',
+    '''tools/purge-secrets\.txt$''',
+    '''config/gitconfig$''',
+    # 1Password integration scripts (contain "1Password" word, not actual passwords)
+    '''lib/integrations/1password/''',
+    '''lib/integrations/1password/''',
+]
+
+# Allowlisted regex patterns (false positives)
+regexes = [
+    # Example/placeholder values
+    '''YOUR_.*_HERE''',
+    '''your_.*_here''',
+    '''REPLACE_WITH_.*''',
+    '''EXAMPLE_.*''',
+    '''TEST_.*''',
+    '''DEMO_.*''',
+    '''SAMPLE_.*''',
+    '''FAKE_.*''',
+    '''DUMMY_.*''',
+    '''PLACEHOLDER_.*''',
+
+    # Environment variable references (not actual secrets)
+    '''\$\{[A-Za-z_][A-Za-z0-9_]*\}''',
+    '''\$[A-Za-z_][A-Za-z0-9_]*''',
+    '''process\.env\.[A-Za-z_][A-Za-z0-9_]*''',
+
+    # Localhost database connections (safe for development)
+    '''mongodb://localhost:''',
+    '''mongodb://127\.0\.0\.1:''',
+    '''postgres://localhost:''',
+    '''postgres://127\.0\.0\.1:''',
+    '''mysql://localhost:''',
+    '''mysql://127\.0\.0\.1:''',
+    '''redis://localhost:''',
+    '''redis://127\.0\.0\.1:''',
+
+    # Test/dev database credentials
+    '''postgres://postgres:postgres@''',
+    '''mysql://root:root@''',
+
+    # Common test passwords
+    '''password123''',
+    '''testpass''',
+    '''changeme''',
+    '''admin123''',
+
+    # Stripe Test Mode Keys
+    '''sk_test_''',
+    '''pk_test_''',
+    '''rk_test_''',
+
+    # OpenAI Example Token
+    '''sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx''',
+
+    # Shell-config specific allowed patterns
+    '''SECRETS_CACHE_TTL''',
+    '''SHELL_CONFIG_SECRETS_CACHE_TTL''',
+    '''op://[A-Za-z0-9_\-/ ]+''',
+    '''EXA_API_KEY=op://''',
+    '''OPENAI_API_KEY=op://''',
+    '''ANTHROPIC_API_KEY=op://''',
+    '''GITHUB_TOKEN=op://''',
+
+    # Documentation examples
+    '''your-key-here''',
+    '''your_openrouter_key_here''',
+    '''YOUR_ACCOUNT_ID''',
+
+    # SHA hashes (not secrets)
+    '''sha256-[A-Za-z0-9+/=]{43,}''',
+    '''sha512-[A-Za-z0-9+/=]{86,}''',
+
+    # Git commit hashes (with word boundaries to avoid matching 40-char hex secrets)
+    '''\b[a-f0-9]{40}\b''',
+
+    # Public keys (safe to share)
+    '''-----BEGIN PUBLIC KEY-----''',
+    '''-----BEGIN CERTIFICATE-----''',
+
+    # AWS Example Keys (official AWS documentation)
+    '''AKIAIOSFODNN7EXAMPLE''',
+    '''AKIAI44QH8DHBEXAMPLE''',
+    '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY''',
+
+    # Example/placeholder API keys in documentation
+    '''msk_live_1234567890abcdefghij''',
+    '''sk-1234567890abcdef1234567890abcdef''',
+    '''sk-1234567890''',
+
+    # Private key documentation examples (showing what to look for, not actual keys)
+    '''-----BEGIN RSA PRIVATE KEY-----`''',
+    '''-----BEGIN DSA PRIVATE KEY-----`''',
+    '''-----BEGIN OPENSSH PRIVATE KEY-----`''',
+    '''-----BEGIN PGP PRIVATE KEY-----`''',
+
+    # Keyboard shortcuts misidentified as API keys
+    '''shift\+alt\+Key[A-Z]''',
+
+    # Log messages containing "Password" (not actual passwords)
+    '''Keys already in 1Password''',
+]
+
+# Stop searching on binary file extensions
+stopwords = [
+    '''\.jpg$''',
+    '''\.jpeg$''',
+    '''\.png$''',
+    '''\.gif$''',
+    '''\.pdf$''',
+    '''\.zip$''',
+    '''\.tar\.gz$''',
+    '''\.mp3$''',
+    '''\.mp4$''',
+]

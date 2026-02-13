@@ -1,0 +1,329 @@
+#!/bin/bash
+# =============================================================================
+# integrations/ghls/ghls - GitHub Projects List
+# =============================================================================
+# Enhanced ls for GitHub directories showing folder status with PR info,
+# branch tracking, and staged/unstaged file counts.
+# Usage: ghls [directory] [options]
+# Options:
+#   --fast         Skip GitHub API calls for instant load (no PR counts)
+#   --prs-only     Show only repositories that have PRs
+#   --group-by-prs Group/sort repos by PR status (clean vs PRs)
+# =============================================================================
+
+# Ensure command_exists is available
+declare -f command_exists &>/dev/null || command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+set -euo pipefail
+
+# Get script directory for sourcing submodules
+GHLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source submodules
+source "$GHLS_DIR/colors.sh"
+source "$GHLS_DIR/common.sh"
+source "$GHLS_DIR/status.sh"
+
+# Configuration
+TARGET_DIR=""
+PRS_ONLY=false
+GROUP_BY_PRS=false
+SC_FAST_MODE=false
+MAX_DEPTH=1
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+    --fast)
+        SC_FAST_MODE=true
+        shift
+        ;;
+    --prs-only)
+        PRS_ONLY=true
+        shift
+        ;;
+    --group-by-prs)
+        GROUP_BY_PRS=true
+        shift
+        ;;
+    -*)
+        echo "Unknown option: $1" >&2
+        echo "Usage: ghls [directory] [--prs-only] [--group-by-prs]" >&2
+        exit 1
+        ;;
+    *)
+        if [[ -z "$TARGET_DIR" ]]; then
+            TARGET_DIR="$1"
+            shift
+        else
+            echo "Too many arguments" >&2
+            echo "Usage: ghls [directory] [--prs-only] [--group-by-prs]" >&2
+            exit 1
+        fi
+        ;;
+    esac
+done
+
+# Default to current directory if no directory provided
+TARGET_DIR="${TARGET_DIR:-.}"
+
+# Check for GitHub CLI availability
+SC_GH_AVAILABLE=false
+if command_exists "gh" && gh auth status >/dev/null 2>&1; then
+    SC_GH_AVAILABLE=true
+fi
+
+# Main logic
+if [[ ! -d "$TARGET_DIR" ]]; then
+    echo -e "${YELLOW}Error: Directory '$TARGET_DIR' not found${RESET}" >&2
+    exit 1
+fi
+
+# Change to target directory
+cd "$TARGET_DIR" || {
+    echo -e "${YELLOW}Error: Cannot change to '$TARGET_DIR'${RESET}" >&2
+    exit 1
+}
+
+# Find all directories
+folders=()
+while IFS= read -r -d '' folder; do
+    folders+=("$folder")
+done < <(find . -maxdepth $MAX_DEPTH -type d -not -path './.*' -print0 | sort -z)
+
+# Count git repositories in current directory
+git_repo_count=0
+for folder in "${folders[@]}"; do
+    [[ "$folder" == "." ]] && continue
+    if [[ -d "$folder/.git" ]]; then
+        git_repo_count=$((git_repo_count + 1))
+    fi
+done
+
+if [[ $git_repo_count -eq 0 ]]; then
+    echo -e "${YELLOW}Error: No git repositories found in current directory.${RESET}" >&2
+    echo -e "${YELLOW}Current directory: $(pwd)${RESET}" >&2
+    echo -e "${YELLOW}Usage: cd ~/github && ghls [options]${RESET}" >&2
+    echo -e "${YELLOW}Use 'ghls --fast' for instant load without PR counts${RESET}" >&2
+    exit 1
+fi
+
+# Initialize temp files for caching
+temp_pr_file=$(mktemp)
+temp_branch_file=$(mktemp)
+temp_stash_file=$(mktemp)
+
+# Cleanup function for trap handler (Issue #106)
+cleanup_temp_files() {
+    rm -f "$temp_pr_file" "$temp_branch_file" "$temp_stash_file" 2>/dev/null || true
+}
+trap cleanup_temp_files EXIT INT TERM
+
+# Pre-fetch data for all repositories (skip in fast mode)
+# Fast mode: instant load, no GitHub API calls
+if [[ $SC_GH_AVAILABLE == true && $SC_FAST_MODE == false ]]; then
+    for folder in "${folders[@]}"; do
+        [[ "$folder" == "." ]] && continue
+        folder_name="${folder#./}"
+
+        if [[ -d "$folder/.git" ]]; then
+            # Get remote URL
+            remote_url=$(git -C "$folder" config --get remote.origin.url 2>/dev/null || echo "")
+
+            # Default values
+            pr_count=0
+            owner=""
+            repo_name="$folder_name"
+
+            if [[ -n "$remote_url" && "$remote_url" =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
+                owner="${BASH_REMATCH[1]}"
+                repo_name=$(basename "${BASH_REMATCH[2]}" .git)
+            fi
+
+            # Only fetch PR data if we have GitHub remote (skip for local-only repos)
+            if [[ -n "$owner" ]]; then
+                # Fetch actual PR count with limit 1000 to get all PRs - Bash 5 native
+                read -r pr_count < <(gh pr list --repo "$owner/$repo_name" --state open --limit 1000 --json number 2>/dev/null | grep -o '"number"' | wc -l)
+                pr_count=${pr_count:-0}
+            fi
+
+            echo "$folder_name:$pr_count" >>"$temp_pr_file"
+
+            # Get active branches count (excluding main/master) - Bash 5 native
+            read -r branch_count < <(git -C "$folder" branch --no-color 2>/dev/null | grep -v -E '^\* main$|^\* master$' | wc -l)
+            branch_count=${branch_count:-0}
+            echo "$folder_name:$branch_count" >>"$temp_branch_file"
+
+            # Get stashed changes count - Bash 5 native
+            read -r stash_count < <(git -C "$folder" stash list 2>/dev/null | wc -l)
+            stash_count=${stash_count:-0}
+            echo "$folder_name:$stash_count" >>"$temp_stash_file"
+        fi
+    done
+fi
+
+# Update header based on options
+if [[ $PRS_ONLY == true ]]; then
+    echo -e "${BOLD}${CYAN}🐙 GitHub Projects with PRs${RESET}"
+elif [[ $GROUP_BY_PRS == true ]]; then
+    echo -e "${BOLD}${CYAN}🐙 GitHub Projects (Grouped by State)${RESET}"
+else
+    echo -e "${BOLD}${CYAN}🐙 GitHub Projects Status${RESET}"
+fi
+echo -e "${DIM}$(printf '─%.0s' {1..80})${RESET}"
+echo
+
+# Collect repository data
+repo_data=()
+non_git_data=()
+total_folders=0
+github_repos=0
+
+for folder in "${folders[@]}"; do
+    [[ "$folder" == "." ]] && continue
+    folder_name="${folder#./}"
+    total_folders=$((total_folders + 1))
+
+    if [[ -d "$folder/.git" ]]; then
+        github_repos=$((github_repos + 1))
+        status_output=$(get_folder_status_enhanced "$folder")
+        repo_data+=("$status_output")
+    else
+        non_git_data+=("type=non-git|folder=$folder_name|display=📁 $folder_name")
+    fi
+done
+
+# Filter and sort repositories based on options
+repos_with_prs=()
+repos_without_prs=()
+
+# Process git repositories
+if [[ ${#repo_data[@]} -gt 0 ]]; then
+    for repo in "${repo_data[@]}"; do
+        # Parse the pipe-separated data (only need has_pr for categorization)
+        IFS='|' read -ra PARTS <<<"$repo"
+        has_pr=false
+
+        for part in "${PARTS[@]}"; do
+            if [[ $part =~ ^has_pr=(.*)$ ]]; then
+                [[ "${BASH_REMATCH[1]}" == "true" ]] && has_pr=true
+                break # Found what we need
+            fi
+        done
+
+        if [[ $has_pr == true ]]; then
+            repos_with_prs+=("$repo")
+        else
+            repos_without_prs+=("$repo")
+        fi
+    done
+fi
+
+# Display results based on options
+if [[ $PRS_ONLY == true ]]; then
+    # Only show repos with PRs
+    if [[ ${#repos_with_prs[@]} -eq 0 ]]; then
+        echo -e "${DIM}No repositories with pull requests found.${RESET}"
+    else
+        echo -e "${BOLD}${YELLOW}📬 Repositories with Pull Requests:${RESET}"
+        echo
+        for repo in "${repos_with_prs[@]}"; do
+            IFS='|' read -ra PARTS <<<"$repo"
+            for part in "${PARTS[@]}"; do
+                if [[ $part =~ ^display=(.*)$ ]]; then
+                    echo -e "  ${BASH_REMATCH[1]}"
+                    break
+                fi
+            done
+        done
+    fi
+elif [[ $GROUP_BY_PRS == true ]]; then
+    # Group repos by PR status
+    echo -e "${BOLD}${GREEN}📬 Repositories with Pull Requests (${#repos_with_prs[@]}):${RESET}"
+    if [[ ${#repos_with_prs[@]} -gt 0 ]]; then
+        echo
+        for repo in "${repos_with_prs[@]}"; do
+            IFS='|' read -ra PARTS <<<"$repo"
+            for part in "${PARTS[@]}"; do
+                if [[ $part =~ ^display=(.*)$ ]]; then
+                    echo -e "  ${BASH_REMATCH[1]}"
+                    break
+                fi
+            done
+        done
+    else
+        echo -e "  ${DIM}None${RESET}"
+    fi
+    echo
+    echo -e "${BOLD}${BLUE}🏠 Clean Repositories (No PRs) (${#repos_without_prs[@]}):${RESET}"
+    if [[ ${#repos_without_prs[@]} -gt 0 ]]; then
+        echo
+        for repo in "${repos_without_prs[@]}"; do
+            IFS='|' read -ra PARTS <<<"$repo"
+            for part in "${PARTS[@]}"; do
+                if [[ $part =~ ^display=(.*)$ ]]; then
+                    echo -e "  ${BASH_REMATCH[1]}"
+                    break
+                fi
+            done
+        done
+    fi
+
+    # Show non-git repos if any
+    if [[ ${#non_git_data[@]} -gt 0 ]]; then
+        echo
+        echo -e "${BOLD}${DIM}📁 Non-Git Folders (${#non_git_data[@]}):${RESET}"
+        for item in "${non_git_data[@]}"; do
+            IFS='|' read -ra PARTS <<<"$item"
+            for part in "${PARTS[@]}"; do
+                if [[ $part =~ ^display=(.*)$ ]]; then
+                    echo -e "  ${BASH_REMATCH[1]}"
+                    break
+                fi
+            done
+        done
+    fi
+else
+    # Default: Show all repos (original behavior)
+    if [[ ${#repo_data[@]} -gt 0 ]]; then
+        for repo in "${repo_data[@]}"; do
+            IFS='|' read -ra PARTS <<<"$repo"
+            for part in "${PARTS[@]}"; do
+                if [[ $part =~ ^display=(.*)$ ]]; then
+                    echo -e "  ${BASH_REMATCH[1]}"
+                    break
+                fi
+            done
+        done
+    fi
+
+    if [[ ${#non_git_data[@]} -gt 0 ]]; then
+        for item in "${non_git_data[@]}"; do
+            IFS='|' read -ra PARTS <<<"$item"
+            for part in "${PARTS[@]}"; do
+                if [[ $part =~ ^display=(.*)$ ]]; then
+                    echo -e "  ${BASH_REMATCH[1]}"
+                    break
+                fi
+            done
+        done
+    fi
+fi
+
+# Summary
+echo
+echo -e "${DIM}$(printf '─%.0s' {1..80})${RESET}"
+
+if [[ $PRS_ONLY == true ]]; then
+    echo -e "${BOLD}Summary:${RESET} ${#repos_with_prs[@]} repositories with PRs out of ${github_repos} GitHub repos"
+elif [[ $GROUP_BY_PRS == true ]]; then
+    echo -e "${BOLD}Summary:${RESET} ${#repos_with_prs[@]} with PRs, ${#repos_without_prs[@]} clean repos, ${github_repos} total GitHub repos"
+else
+    echo -e "${BOLD}Summary:${RESET} ${total_folders} total folders, ${GREEN}${github_repos} GitHub repos${RESET}"
+fi
+
+if [[ $github_repos -gt 0 ]]; then
+    echo -e "${DIM}💡 Tip: Use --prs-only or --group-by-prs for filtered views${RESET}"
+fi
+
+# Note: Temp files are automatically cleaned up by trap handler on EXIT/INT/TERM

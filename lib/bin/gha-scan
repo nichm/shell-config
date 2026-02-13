@@ -1,0 +1,450 @@
+#!/usr/bin/env bash
+# =============================================================================
+# gha-scan - GitHub Actions Security Scanner CLI
+# =============================================================================
+# Universal CLI command for scanning GitHub Actions workflows across any repo.
+# Part of shell-config.
+# Usage:
+#   gha-scan                  # Scan current repo
+#   gha-scan -q               # Quick mode (actionlint only)
+#   gha-scan -m               # Modified files only
+#   gha-scan -v               # Verbose output
+#   gha-scan /path/to/repo    # Scan specific repo
+# =============================================================================
+
+# Ensure command_exists is available
+declare -f command_exists &>/dev/null || command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+set -euo pipefail
+
+# Resolve shell-config paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -z "${SHELL_CONFIG_DIR:-}" ]]; then
+    SHELL_CONFIG_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
+SHELL_CONFIG_LIB="$SHELL_CONFIG_DIR/lib"
+
+# Shared colors (required for consistent output)
+if [[ -f "$SHELL_CONFIG_LIB/core/colors.sh" ]]; then
+    # shellcheck source=../core/colors.sh
+    source "$SHELL_CONFIG_LIB/core/colors.sh"
+fi
+
+# Defaults
+GHA_SCAN_VERBOSE="${GHA_SCAN_VERBOSE:-0}"
+GHA_SCAN_MODIFIED_ONLY="${GHA_SCAN_MODIFIED_ONLY:-0}"
+GHA_SCAN_MODE="${GHA_SCAN_MODE:-default}"
+GHA_SCAN_OUTPUT="${GHA_SCAN_OUTPUT:-cli}"
+
+# Counters
+_GHA_TOTAL_ERRORS=0
+_GHA_TOTAL_WARNINGS=0
+
+# =============================================================================
+# Shared Utilities (merged from lib/gha-security/shared/*)
+# =============================================================================
+
+_gha_check_tool() {
+    local tool="$1"
+    if command_exists "$tool"; then
+        return 0
+    elif [[ -x "$HOME/.local/bin/$tool" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+_gha_get_tool_path() {
+    local tool="$1"
+    if command_exists "$tool"; then
+        command -v "$tool"
+    elif [[ -x "$HOME/.local/bin/$tool" ]]; then
+        echo "$HOME/.local/bin/$tool"
+    fi
+}
+
+_gha_extract_version() {
+    local cmd_output="$1"
+    # Use bash native regex with BASH_REMATCH (no fork)
+    if [[ "$cmd_output" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+    fi
+}
+
+_gha_get_version() {
+    local tool="$1"
+    local cmd
+    cmd=$(_gha_get_tool_path "$tool")
+    [[ -z "$cmd" ]] && echo "not installed" && return
+
+    local ver
+    case "$tool" in
+    actionlint) ver=$(_gha_extract_version "$("$cmd" --version 2>/dev/null | head -1)") ;;
+    zizmor) ver=$(_gha_extract_version "$("$cmd" --version 2>/dev/null)") ;;
+    poutine) ver=$(_gha_extract_version "$("$cmd" version 2>/dev/null)") ;;
+    pinact) ver=$(_gha_extract_version "$("$cmd" version 2>/dev/null)") ;;
+    octoscan) ver="latest" ;;
+    *) ver="unknown" ;;
+    esac
+    echo "${ver:-unknown}"
+}
+
+_gha_find_repo_root() {
+    local dir="$1"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.git" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    echo "$1"
+}
+
+_gha_get_workflow_dir() {
+    local repo_root="$1"
+    if [[ -d "$repo_root/.github/workflows" ]]; then
+        echo "$repo_root/.github/workflows"
+    else
+        echo ""
+    fi
+}
+
+_gha_get_modified_workflows() {
+    {
+        git diff --cached --name-only --diff-filter=ACM 2>/dev/null
+        git diff --name-only --diff-filter=ACM 2>/dev/null
+    } | grep -E '^\.github/workflows/.*\.(yml|yaml)$' | sort -u
+}
+
+_gha_find_config() {
+    local config_name="$1"
+    local repo_root="$2"
+
+    local global_config="$SHELL_CONFIG_LIB/validation/validators/gha/config/$config_name"
+    if [[ -f "$global_config" ]]; then
+        echo "$global_config"
+        return 0
+    fi
+
+    local local_config="$repo_root/$config_name"
+    if [[ -f "$local_config" ]]; then
+        echo "$local_config"
+        return 0
+    fi
+
+    echo ""
+}
+
+# =============================================================================
+# Console Reporter (merged from lib/gha-security/reporters/console-reporter.sh)
+# =============================================================================
+
+_gha_log_header() {
+    printf '\n%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "${CYAN:-}" "${NC:-}"
+    printf '%s  %s%s\n' "${CYAN:-}" "$1" "${NC:-}"
+    printf '%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "${CYAN:-}" "${NC:-}"
+}
+
+_gha_log_scanner() {
+    printf '%s%s %s%s %sv%s%s\n' "${BLUE:-}" "$1" "$2" "${NC:-}" "${CYAN:-}" "$3" "${NC:-}"
+}
+
+_gha_log_success() { printf '%s%s %s%s\n' "${GREEN:-}" "OK" "$1" "${NC:-}"; }
+_gha_log_warning() { printf '%s%s %s%s\n' "${YELLOW:-}" "WARN" "$1" "${NC:-}"; }
+_gha_log_error() { printf '%s%s %s%s\n' "${RED:-}" "ERR" "$1" "${NC:-}"; }
+_gha_log_info() { [[ $GHA_SCAN_VERBOSE -eq 1 ]] && printf '%s%s %s%s\n' "${BLUE:-}" "INFO" "$1" "${NC:-}"; }
+
+_gha_report_summary() {
+    local errors="$1"
+    local warnings="$2"
+    local duration="$3"
+    local mode="$4"
+
+    printf '\n%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "${CYAN:-}" "${NC:-}"
+
+    if [[ $errors -gt 0 ]]; then
+        printf '\n  %sFAILED%s\n\n' "${RED:-}" "${NC:-}"
+        printf '  Security scan FAILED with %s error(s)\n\n' "$errors"
+        printf '%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "${CYAN:-}" "${NC:-}"
+        printf 'Duration: %ss | Errors: %s | Warnings: %s\n' "$duration" "$errors" "$warnings"
+        return 1
+    elif [[ $warnings -gt 0 ]]; then
+        printf '\n  %sPASSED WITH WARNINGS%s\n\n' "${YELLOW:-}" "${NC:-}"
+        printf '  Security scan PASSED with %s warning(s)\n\n' "$warnings"
+        printf '%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "${CYAN:-}" "${NC:-}"
+        printf 'Duration: %ss | Warnings: %s\n' "$duration" "$warnings"
+        [[ "$mode" != "all" ]] && printf '%sTip:%s Run "gha-scan -a" for deeper analysis\n' "${BLUE:-}" "${NC:-}"
+        return 0
+    else
+        printf '\n  %sPASSED%s\n\n' "${GREEN:-}" "${NC:-}"
+        printf '  All security checks PASSED.\n\n'
+        printf '%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "${CYAN:-}" "${NC:-}"
+        printf 'Duration: %ss | No issues found\n' "$duration"
+        [[ "$mode" != "all" ]] && printf '%sTip:%s Run "gha-scan -a" for deeper analysis\n' "${BLUE:-}" "${NC:-}"
+        return 0
+    fi
+}
+
+# =============================================================================
+# Component Loader (validators)
+# =============================================================================
+
+_gha_load_components() {
+    local validators_dir="$SHELL_CONFIG_LIB/validation/validators/gha"
+
+    # Load validators
+    # shellcheck source=../validation/validators/gha/actionlint-validator.sh
+    source "$validators_dir/actionlint-validator.sh"
+    # shellcheck source=../validation/validators/gha/zizmor-validator.sh
+    source "$validators_dir/zizmor-validator.sh"
+    # shellcheck source=../validation/validators/gha/poutine-validator.sh
+    source "$validators_dir/poutine-validator.sh"
+    # shellcheck source=../validation/validators/gha/octoscan-validator.sh
+    source "$validators_dir/octoscan-validator.sh"
+    # shellcheck source=../validation/validators/gha/pinact-validator.sh
+    source "$validators_dir/pinact-validator.sh"
+}
+
+# =============================================================================
+# Main Entry Point
+# =============================================================================
+
+gha_scan() {
+    if ! declare -f _gha_check_tool >/dev/null; then
+        _gha_load_components
+    fi
+
+    local workflow_dir=""
+    local repo_root=""
+
+    _GHA_TOTAL_ERRORS=0
+    _GHA_TOTAL_WARNINGS=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        -a | --all)
+            GHA_SCAN_MODE="all"
+            shift
+            ;;
+        -q | --quick)
+            GHA_SCAN_MODE="quick"
+            shift
+            ;;
+        -m | --modified)
+            GHA_SCAN_MODIFIED_ONLY=1
+            shift
+            ;;
+        -v | --verbose)
+            GHA_SCAN_VERBOSE=1
+            shift
+            ;;
+        -s | --sarif)
+            GHA_SCAN_OUTPUT="sarif"
+            shift
+            ;;
+        -j | --json)
+            GHA_SCAN_OUTPUT="json"
+            shift
+            ;;
+        -h | --help)
+            echo "Usage: gha-scan [OPTIONS] [WORKFLOW_DIR]"
+            echo ""
+            echo "Options:"
+            echo "  -a, --all       Run all scanners (actionlint + zizmor + poutine + octoscan)"
+            echo "  -q, --quick     Quick mode (actionlint only)"
+            echo "  -m, --modified  Scan only modified workflow files"
+            echo "  -v, --verbose   Show detailed output"
+            echo "  -h, --help      Show this help"
+            echo ""
+            echo "Default: actionlint + zizmor (balanced scan)"
+            echo ""
+            echo "Examples:"
+            echo "  gha-scan                  # Scan current repo"
+            echo "  gha-scan -q -m            # Quick scan modified files only"
+            echo "  gha-scan /path/to/repo    # Scan specific repo"
+            return 0
+            ;;
+        -*)
+            echo "ERROR: Unknown option: $1" >&2
+            echo "WHY: gha-scan only supports documented flags" >&2
+            echo "FIX: Run 'gha-scan --help' for usage" >&2
+            return 1
+            ;;
+        *)
+            break
+            ;;
+        esac
+    done
+
+    if [[ $# -gt 0 ]]; then
+        workflow_dir="$1"
+        shift
+    fi
+
+    if [[ $# -gt 0 ]]; then
+        echo "ERROR: Too many arguments provided" >&2
+        echo "WHY: gha-scan accepts at most one positional path" >&2
+        echo "FIX: Provide a single repo path or omit it" >&2
+        return 1
+    fi
+
+    if [[ -n "$workflow_dir" ]]; then
+        if [[ -d "$workflow_dir/.github/workflows" ]]; then
+            repo_root="$workflow_dir"
+            workflow_dir="$workflow_dir/.github/workflows"
+        elif [[ -d "$workflow_dir" ]]; then
+            repo_root=$(_gha_find_repo_root "$workflow_dir")
+        else
+            echo "ERROR: Directory not found: $workflow_dir" >&2
+            echo "WHY: gha-scan needs a valid repo path to locate workflows" >&2
+            echo "FIX: Provide an existing directory path" >&2
+            return 2
+        fi
+    else
+        repo_root=$(_gha_find_repo_root "$(pwd)")
+        workflow_dir=$(_gha_get_workflow_dir "$repo_root")
+    fi
+
+    if [[ -z "$workflow_dir" ]] || [[ ! -d "$workflow_dir" ]]; then
+        _gha_log_warning "No .github/workflows directory found"
+        return 0
+    fi
+
+    _gha_log_header "GitHub Actions Security Scanner"
+    echo "Repository: $repo_root"
+    echo "Workflows:  $workflow_dir"
+    echo "Mode:       $GHA_SCAN_MODE"
+
+    local start_time
+    start_time=$(date +%s)
+
+    local files=()
+    if [[ $GHA_SCAN_MODIFIED_ONLY -eq 1 ]]; then
+        echo "Scope:      Modified files only"
+        while IFS= read -r f; do
+            if [[ -n "$f" ]]; then
+                local full_path="$repo_root/$f"
+                # Use platform-appropriate realpath
+                if [[ "$(uname)" == "Darwin" ]] && command_exists "grealpath"; then
+                    # macOS: Use grealpath from coreutils
+                    files+=("$(grealpath "$full_path")")
+                elif command_exists "realpath"; then
+                    # Linux or macOS with BSD realpath
+                    files+=("$(realpath "$full_path")")
+                else
+                    # Fallback to relative path
+                    files+=("$full_path")
+                fi
+            fi
+        done < <(_gha_get_modified_workflows)
+
+        if [[ ${#files[@]} -eq 0 ]]; then
+            _gha_log_success "No modified workflow files to scan"
+            return 0
+        fi
+        echo "Files:      ${#files[@]}"
+    else
+        echo "Scope:      All workflow files"
+    fi
+
+    echo ""
+
+    case "$GHA_SCAN_MODE" in
+    quick)
+        _gha_run_actionlint "$workflow_dir" "$repo_root" "${files[@]}"
+        ;;
+    all)
+        _gha_run_actionlint "$workflow_dir" "$repo_root" "${files[@]}"
+        _gha_run_zizmor "$workflow_dir" "$repo_root" "${files[@]}"
+        _gha_run_poutine "$workflow_dir" "$repo_root"
+        _gha_run_octoscan "$workflow_dir" "$repo_root" "${files[@]}"
+        ;;
+    *)
+        _gha_run_actionlint "$workflow_dir" "$repo_root" "${files[@]}"
+        _gha_run_zizmor "$workflow_dir" "$repo_root" "${files[@]}"
+        ;;
+    esac
+
+    local end_time
+    end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+
+    _gha_report_summary "$_GHA_TOTAL_ERRORS" "$_GHA_TOTAL_WARNINGS" "$duration" "$GHA_SCAN_MODE"
+}
+
+# =============================================================================
+# Validation Engine Integration (pre-commit)
+# =============================================================================
+
+_gha_validate_workflow_file() {
+    if ! declare -f _gha_check_tool >/dev/null; then
+        _gha_load_components
+    fi
+
+    local file="$1"
+    [[ ! -f "$file" ]] && return 0
+    [[ "$file" != *.yml && "$file" != *.yaml ]] && return 0
+    [[ "$file" != */.github/workflows/* && "$file" != .github/workflows/* ]] && return 0
+
+    if _gha_check_tool "actionlint"; then
+        local cmd
+        cmd=$(_gha_get_tool_path actionlint)
+        local repo_root
+        repo_root=$(_gha_find_repo_root "$(dirname "$file")")
+
+        local args=()
+        [[ -f "$repo_root/.github/actionlint.yaml" ]] && args+=("-config-file" "$repo_root/.github/actionlint.yaml")
+
+        local result
+        result=$("$cmd" "${args[@]}" -- "$file" 2>&1)
+        local exit_code=$?
+
+        if [[ $exit_code -ne 0 ]]; then
+            # Filter out :info: messages using bash native regex
+            # Only count lines that look like actual errors (with line:col format)
+            local errors=""
+            local line
+            local count=0
+            local error_limit="${GHA_VALIDATE_ERROR_LIMIT:-10}"
+            local truncated=false
+            while IFS= read -r line || [[ -n "$line" ]]; do
+                [[ "$line" =~ :info: ]] && continue
+                # Only add lines that look like errors (with line:col format)
+                if [[ "$line" =~ :[0-9]+:[0-9]+: ]]; then
+                    if [[ $count -lt $error_limit ]]; then
+                        errors+="$line"$'\n'
+                    else
+                        truncated=true
+                    fi
+                    ((count++))
+                fi
+            done <<<"$result"
+
+            if [[ -n "$errors" ]]; then
+                if [[ "$truncated" == true ]]; then
+                    echo "GitHub Actions: $file ($count errors, showing first $error_limit)"
+                else
+                    echo "GitHub Actions: $file"
+                fi
+                printf '%s' "$errors"
+                if [[ "$truncated" == true ]]; then
+                    echo "... ($((count - error_limit)) more errors hidden)"
+                    echo "Run 'gha-scan $file' for full output or set GHA_VALIDATE_ERROR_LIMIT=50"
+                fi
+                return 1
+            fi
+        fi
+    fi
+    return 0
+}
+
+# Auto-load components if sourced
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    _gha_load_components
+fi
+
+# Run the scanner when executed directly
+if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    gha_scan "$@"
+fi

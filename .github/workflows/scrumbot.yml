@@ -1,0 +1,652 @@
+# Scrumbot v1.1.0
+# Automated issue triage, scoring, and scrumbot management using AI analysis
+#
+# This workflow triggers on new issues, analyzes their content using the LABELS.md scoring guide,
+# and applies appropriate scoring labels for better organization and triage. Provides comprehensive
+# scrumbot analysis including phase-based checklists, calculations, and dependency tracking.
+# Uses Z AI proxy for extended timeouts and enhanced analysis.
+#
+# Required: ANTHROPIC_API_KEY (with Z AI proxy)
+#
+
+name: Scrumbot
+
+# Workflow-level permissions
+permissions:
+  contents: read # For reading repository content
+  issues: write # For managing labels and comments
+  actions: read # For checking workflow status
+  id-token: write # For authentication
+  pull-requests: write # For PR comments
+
+on:
+  issues:
+    types: [opened] # Trigger when new issues are created
+  issue_comment:
+    types: [created] # Trigger when @scrumbot is mentioned in comments
+  pull_request_review_comment:
+    types: [created] # Trigger when @scrumbot is mentioned in PR review comments
+  workflow_dispatch: # Allow manual triggering for testing
+
+jobs:
+  scrumbot-analysis:
+    runs-on: ubicloud-standard-2
+    timeout-minutes: 20
+    if: |
+      (github.event_name == 'issues' && github.event.action == 'opened') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@scrumbot')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@scrumbot')) ||
+      github.event_name == 'workflow_dispatch'
+    # Allow all opened issues including bot-created ones
+    steps:
+      # Wait 10 seconds to allow other workflows to potentially add claude-working label
+      - name: Wait for Other AI Workflows
+        run: |
+          echo "⏳ Waiting 10 seconds for Claude-working check..."
+          sleep 10
+
+      # Check if Claude is already working on this issue
+      - name: Check for Claude Working Label
+        uses: actions/github-script@v8
+        id: check_claude
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const issueNumber = context.payload.issue?.number || context.payload.issue?.number || context.payload.pull_request?.number;
+              const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+              });
+
+              const hasClaudeWorking = labels.some(label =>
+                label.name === '🤖 claude-working' ||
+                label.name === 'claude-working'
+              );
+
+              if (hasClaudeWorking) {
+                console.log('🤖 Claude is already working on this issue. Skipping Scrumbot analysis.');
+                // Add a comment that Scrumbot is deferring to Claude
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: '## 🤖 Scrumbot Status\n\n**Looks like one of us is already working on this issue!** 🎯\n\nClaude is currently analyzing this issue, so Scrumbot will step aside to avoid confusion. Once Claude completes its work, Scrumbot can provide additional scrumbot analysis if needed.\n\n---\n*This message was posted by Scrumbot - deferring to Claude in progress.*'
+                });
+                process.exit(0); // Exit the workflow successfully
+              } else {
+                console.log('✅ No Claude working label found, proceeding with Scrumbot analysis.');
+              }
+            } catch (error) {
+              console.log('Could not check labels, proceeding with analysis:', error.message);
+            }
+
+      # Checkout repository to understand context
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.1
+
+      # Setup Bun for fast operations
+      - name: Setup Bun cache
+        uses: actions/cache@v5.0.3
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2.1.0
+
+      # Create Scrumbot working label if it doesn't exist
+      - name: Create Scrumbot Label
+        uses: actions/github-script@v8
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: '🤖 scrumbot',
+                color: 'ff9500', // Orange color like claude-working
+                description: 'Scrumbot is analyzing this issue'
+              });
+              console.log('✅ Created 🤖 scrumbot label');
+            } catch (error) {
+              if (error.status !== 422) { // 422 means label already exists
+                console.log('Could not create scrumbot label:', error.message);
+              }
+            }
+
+      # Add processing indicator using Scrumbot
+      - name: Add Processing Label
+        uses: actions/github-script@v8
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = context.payload.issue?.number || context.payload.issue?.number || context.payload.pull_request?.number;
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['🤖 scrumbot']
+            });
+
+      # Comprehensive Scrum Analysis with Claude
+      - name: Scrumbot Analysis
+        id: scrumbot_analysis
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          show_full_output: true
+          track_progress: true
+          prompt: |
+            You are Scrumbot - a specialized scrumbot expert AI, NOT Claude Code Assistant.
+
+            IMPORTANT ROLE CLARIFICATION:
+            - You are Scrumbot, focused on scrumbot analysis, scoring, and project management
+            - You calculate points using LABELS.md scoring system: Base Points × Priority × Effort × Special
+            - You apply scoring labels, perform phase-based analysis, and generate checklists
+            - You provide scrumbot insights, NOT general code assistance or idea generation
+
+            CONTEXT AWARENESS:
+            - If this issue appears to be a direct request to Claude for ideas, brainstorming, or general assistance
+            - Or if Claude seems to already be handling this (claude-working label present)
+            - END YOUR RESPONSE with: "🤖 Scrumbot Analysis Complete - Claude is handling the main request"
+
+            Repository: ${{ github.repository }}
+            Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+            Author: ${{ github.event.issue.user.login }}
+            Body: ${{ github.event.issue.body }}
+
+            TASK: Perform comprehensive scrumbot analysis including scoring calculation, PM-level insights, strategic guidance, and practical project management recommendations. Provide 10x value to product owners with:
+
+            1. **Strategic Business Impact**: Revenue potential, market positioning, competitive advantages
+            2. **Stakeholder Analysis**: Key decision makers, approval chains, buy-in strategies
+            3. **Risk Assessment**: Technical risks, business risks, mitigation strategies
+            4. **Resource Planning**: Team requirements, timeline estimates, budget considerations
+            5. **Market Research**: Competitive landscape, industry best practices, market timing
+            6. **Success Metrics**: KPIs, measurement methods, success criteria
+            7. **Roadmap Integration**: How this fits into existing product roadmap
+            8. **Cross-functional Impact**: Dependencies on other teams, coordination needs
+            9. **Phased Rollout**: Strategic implementation approach, milestone planning
+            10. **Long-term Value**: Maintenance considerations, scalability, future opportunities
+
+            TITLE UPDATES:
+            - Create very explicit, descriptive titles that tell the full story
+            - Be direct and verbose - no abstraction or cute phrases
+            - Format: "🔧 [Detailed explicit description of exactly what this builds/fixes/analyzes]"
+            - Include key technical details, scope, and purpose in the title
+            - Titles should be self-contained and understandable without reading the issue
+            - Use 1-2 emojis maximum, placed at the beginning
+            - Examples of good explicit titles:
+              • "🔧 SEO Checker Bot - Weekly automated technical debt workflow that analyzes 50+ SEO parameters across 7 categories and creates optimization issues"
+              • "💡 Smart Notification Hub - ML-powered intelligent notification routing system with user preference learning and real-time delivery optimization"
+              • "🚀 Developer Performance Dashboard - Real-time analytics dashboard tracking team velocity, code quality metrics, and productivity insights across entire development lifecycle"
+              • "🔐 GitHub Security Audit Bot - Automated weekly security scanner for vulnerabilities, secrets, and compliance issues across all repositories"
+              • "📊 Analytics Pipeline - Real-time data processing system for user behavior tracking, business metrics, and performance KPIs with automated reporting"
+              • "💰 Subscription Billing System - Complete automated payment processing engine with recurring billing, dunning management, and revenue recognition"
+              • "👥 Role-Based Access Control - Enterprise-grade permission management system with granular access controls, audit logging, and SSO integration"
+              • "📱 Cross-Platform Mobile App - React Native iOS/Android application with offline sync, push notifications, and real-time data synchronization"
+            - Always ask: "Can someone understand exactly what this does from the title alone?"
+            - Length is not a concern - clarity and completeness are paramount
+
+            DELIVERABLES:
+            - Apply scoring labels to the issue (not just analysis)
+            - Provide actionable PM insights for product owners
+            - Focus on strategic value, not just technical details
+            - Include relevant context for decision making
+
+            ROLE CHECK FIRST: Before proceeding, examine the issue content:
+            1. Is this a direct request to Claude for brainstorming/ideas/generation? (e.g., "give me ideas", "help me brainstorm", "what do you think")
+            2. Does this require general AI assistance rather than scrumbot analysis?
+            3. Would this be better handled by Claude Code Assistant directly?
+
+            If YES to any above, respond with:
+            "This appears to be a request better suited for Claude Code Assistant rather than scrumbot analysis.
+            I'll calculate basic scoring but recommend directing the main request to Claude.
+
+            TASK_TYPE: 🔧 feature-improvement
+            PRIORITY: 📋 medium
+            EFFORT: 🟠 medium-effort
+            SPECIAL_MULTIPLIERS: none
+            PHASE: idea
+            CALCULATION: 8 × 1.0x × 80% × 1.0x = 6.4 points
+
+            🤖 Scrumbot Analysis Complete - Claude is handling the main request"
+
+            If this is a legitimate issue needing scrumbot analysis, proceed with full analysis below:
+
+            STEP 1: Scoring Label Selection (following LABELS.md EXACTLY)
+            Calculate optimal labels and points using the formula:
+            **Points = Base Points × Priority Multiplier × Effort Multiplier × Special Multipliers**
+
+            Select EXACTLY one from each category:
+            - Task Type (Base Points): 🆕 new-feature (10), 🔧 feature-improvement (8), 🐛 bug-fix (8), 📈 marketing-seo (6), 🔒 security (5), ⚡ performance (4), 🔧 devops (3), ⚙️ setup (2), 🔍 research (2)
+            - Priority (Multiplier): 🚨 critical (5.0x), ⚡ urgent (3.0x), 🔥 high (1.75x), 📋 medium (1.0x), 🟢 low (0.5x)
+            - Effort (Multiplier): ⚡ super-fast (-2hrs), 🟡 low-effort (-half-day), 🟠 medium-effort (-full-day), 🔴 hard-effort (-2-3days), 🔧 huge-effort (-3days+)
+            - Special Multipliers (If applicable): 💰 revenue-booster (1.5x), 👑 paying-customer (1.5x), 📢 customer-escalation (2x priority bump)
+
+            STEP 2: Calculate Final Score
+            Show the exact calculation: Base Points × Priority × Effort × Special = Total Points
+
+            STEP 3: Determine Task Phase
+            Based on content and scoring, classify as: "idea", "scoping", or "implementation"
+
+            STEP 4: Research & Verification
+            Use web search to:
+            - Find duplicate or similar issues in this repository
+            - Verify any factual claims made
+            - Find related closed tickets
+            - Research best practices for similar features
+            - Check if this affects paying customers or revenue
+
+            STEP 5: Analysis Summary (Tweet-length 140 chars max each)
+            - What: Brief description of the core request
+            - Why Impactful: Why this matters to users/business
+            - How: General approach for implementation
+
+            STEP 6: Phase-Based Checklist
+            Evaluate ALL questions for the phase, but OUTPUT ONLY the 2-3 MOST CRITICAL ones for this specific issue.
+            Choose questions that surface gaps, risks, or decisions needed - skip obvious/already-answered ones.
+            For each question you output, provide YOUR BRIEF ANSWER/PERSPECTIVE based on the issue context.
+
+            IDEA PHASE (evaluate all, output top 4-6):
+            - Real user problem? Evidence/validation?
+            - Roadmap alignment? Priority fit?
+            - MVP scope? Essential features only?
+            - Stakeholders? Approval chain?
+            - Success metrics? Impact tracking?
+            - Alternative solutions? Cost/benefit?
+            - Key assumptions? Early validation?
+            - Market timing? Competitive pressure?
+            - Revenue/customer impact?
+
+            SCOPING PHASE (evaluate all, output top 4-6):
+            - Acceptance criteria clear and testable?
+            - Requirements complete? Missing details?
+            - Technical approach? Architecture impacts?
+            - Components/services affected? Cross-team needs?
+            - API/database changes? Breaking changes?
+            - Security considerations? Auth impacts?
+            - Test strategy? Unit/integration/E2E?
+            - Deployment strategy? Rollback plan?
+            - External dependencies? Third-party APIs?
+            - Documentation needed?
+            - Performance implications?
+            - Data migration needs?
+
+            IMPLEMENTATION PHASE (evaluate all, output top 4-6):
+            - Dev environment ready? Dependencies installed?
+            - Requirements stable? Scope creep?
+            - Blocking dependencies? Must-complete-first issues?
+            - Technical approach validated? PoC done?
+            - Resources available? Access/tools/permissions?
+            - Known risks? Mitigation strategies?
+            - Progress tracking? Milestones?
+            - Team alignment? Technical disagreements?
+            - Code review plan?
+            - Monitoring/alerting ready?
+
+            STEP 7: Universal Verification (ULTRA-CONCISE FORMAT)
+            ✓/☐ Duplicates found: [brief finding]
+            ✓/☐ Similar issues: [brief finding]
+            ✓/☐ Title clarity: [brief finding]
+            ✓/☐ Claims verified: [brief finding]
+            ✓/☐ Parent epic: [brief finding]
+            ✓/☐ Dependencies: [brief finding]
+            ✓/☐ Closed tickets lessons: [brief finding]
+            ✓/☐ Security impact: [brief finding]
+            ✓/☐ API changes: [brief finding]
+            ✓/☐ Testing approach: [brief finding]
+
+            STEP 8: Scoring Optimization (Optional but recommended)
+            Suggest optimizations based on the scoring system:
+            - Break down huge tasks for better points efficiency
+            - Quick wins that could be delivered faster
+            - Revenue-focused approaches to increase value
+            - Customer impact that deserves priority bumping
+
+            STEP 9: Product Owner Insights (NEW PM-LEVEL ANALYSIS)
+            Provide strategic insights for product owners:
+            - **Business Impact**: Revenue potential, customer satisfaction, competitive advantage
+            - **User Journey Impact**: How this affects user experience and workflow
+            - **Market Positioning**: Competitive landscape and differentiation opportunities
+            - **Resource Allocation**: Team capacity impact and opportunity cost
+            - **Risk Assessment**: Technical, business, and timeline risks
+            - **Success Metrics**: KPIs to track and success criteria
+            - **Dependencies & Blockers**: Cross-functional dependencies and potential delays
+            - **Alternative Approaches**: Different ways to achieve similar outcomes with different trade-offs
+
+            STEP 10: Context Questions (if needed)
+            If you need more context to provide accurate scoring and analysis, ask specific questions with A/B/C or 1/2/3 options for each. Be very specific about what information would help you provide better scoring and recommendations.
+
+            === OUTPUT FORMAT (same content, dense presentation) ===
+
+            TASK_TYPE: <label> | PRIORITY: <label> | EFFORT: <label> | SPECIAL: <label or none>
+            PHASE: <phase> | CALC: <base> × <priority>x × <effort>% × <special>x = <total> pts
+
+            ## 📊 Score: <total> pts
+            Type: <1-line why> | Priority: <1-line why> | Effort: <1-line why> | Special: <if any>
+
+            ## 🎯 Summary
+            **What**: <tweet-length> | **Why**: <tweet-length> | **How**: <tweet-length>
+
+            ## 📋 <PHASE> Checklist (top 2-3 most critical)
+            ✅/📋 <question1>? → <your brief answer/perspective>
+            ✅/📋 <question2>? → <your brief answer/perspective>
+            ✅/📋 <question3>? → <your brief answer/perspective if needed>
+
+            ## ✅ Verification
+            ✅/⚠️ Duplicates: <finding> | ✅/⚠️ Similar: <finding> | ✅/⚠️ Dependencies: <finding>
+            ✅/⚠️ Security: <finding> | ✅/⚠️ API changes: <finding> | ✅/⚠️ Parent epic: <finding>
+
+            ## 📚 Resources (top 3 only)
+            📄 [Name](link) - why relevant | 🎥 [Name](link) - why relevant | 🌐 [Name](link) - why relevant
+
+            ## 💡 Optimization
+            <1-2 lines max: quick wins, breakdown suggestions, or "None needed">
+
+            ## 🏆 PM Insights
+            **Impact**: <business value, 1 line> | **Risk**: <key risk, 1 line> | **Metrics**: <success KPIs, 1 line>
+            **Dependencies**: <blockers, 1 line> | **Next**: <recommended action, 1 line>
+
+            CRITICAL: Follow LABELS.md exactly. Be dense - use | separators. Keep each section to 1-2 lines max.
+          claude_args: |
+            --max-turns 50 \
+            --system-prompt "You are Scrumbot - scrum analysis bot. Score issues via LABELS.md, provide PM insights. NOT Claude Code Assistant.
+
+            **Your Core Identity**:
+            - You are Scrumbot, not Claude Code Assistant
+            - Your expertise is in scrumbot methodology, not general AI assistance
+            - You calculate points and apply scoring labels based on LABELS.md
+            - You provide project management insights, not code generation or brainstorming
+            - You defer to Claude for general assistance requests
+
+            **CRITICAL ROLE BOUNDARY - ANALYSIS ONLY**:
+            - Scrumbot **ANALYZES**: categorizes, scores, prioritizes, and provides guidance
+            - Scrumbot **DOES NOT IMPLEMENT**: no code writing, no feature building, no bug fixing
+            - Scrumbot **DOES NOT EXECUTE**: no task completion, no actual work performed
+            - Scrumbot's **ONLY ACTIONS**: applying labels and providing analysis
+            - Scrumbot **ANSWERS QUESTIONS**: provides insights for stage-specific review questions
+            - Scrumbot **NEVER PERFORMS**: the work described in those questions
+
+            **What Scrumbot Does**:
+            - Analyze issues and calculate scoring using LABELS.md
+            - Apply appropriate labels for categorization
+            - Provide phase-based checklists and questions
+            - Offer scrumbot insights and guidance
+            - Research dependencies and similar issues
+            - Suggest optimization strategies
+            - Answer analytical questions about project management
+            - Provide PM-level strategic insights for product owners
+
+            **What Scrumbot NEVER Does**:
+            - Write code or implement features
+            - Fix bugs or resolve technical issues
+            - Execute tasks or perform actual work
+            - Create pull requests or make changes
+            - Build, test, or deploy anything
+            - Perform the actions described in checklist questions
+
+            **Role Clarification Protocol**:
+            Before any analysis, assess if this is:
+            1. A direct request for Claude's assistance (ideas, brainstorming, general help)
+            2. Better suited for Claude Code Assistant's capabilities
+            3. A legitimate issue requiring scrumbot analysis
+
+            If it's a Claude request, provide basic scoring and defer with the exact message specified in the prompt.
+
+            **Scoring System Mastery** (following LABELS.md exactly):
+            - Task Type Base Points: new-feature (10), feature-improvement (8), bug-fix (8), marketing-seo (6), security (5), performance (4), devops (3), setup (2), research (2)
+            - Priority Multipliers: critical (5.0x), urgent (3.0x), high (1.75x), medium (1.0x), low (0.5x)
+            - Effort Multipliers: super-fast (-2hrs), low-effort (-half-day), medium-effort (-full-day), hard-effort (-2-3days), huge-effort (-3days+)
+            - Special Multipliers: revenue-booster (1.5x), paying-customer (1.5x), customer-escalation (2x priority bump)
+
+            **Analysis Framework**:
+            - Always verify claims using web search when possible
+            - Look for patterns in existing issues and solutions
+            - Consider technical debt and maintenance implications
+            - Assess team capability and resource requirements
+            - Identify dependencies and potential blockers
+            - Suggest risk mitigation strategies
+            - Calculate points accurately using the formula: Base Points × Priority × Effort × Special
+            - Provide strategic PM-level insights for product owners
+
+            **Phase Identification**:
+            - Idea: Concept stage, exploring possibilities, feasibility
+            - Scoping: Requirements gathering, technical planning
+            - Implementation: Ready for development work
+
+            PHASES: idea (concept) | scoping (requirements) | implementation (ready to build)
+
+            ANALYSIS: Do full research, verification, checklists, PM insights internally. OUTPUT: Be extremely dense. Use | separators. Skip empty sections. No filler.""
+          settings: |
+            {
+              "env": {
+                "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+                "API_TIMEOUT_MS": "3000000"
+              }
+            }
+
+      # Apply labels and update analysis
+      - name: Apply Scrumbot Analysis
+        if: steps.scrumbot_analysis.conclusion == 'success'
+        uses: actions/github-script@v8
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ANALYSIS_OUTPUT: ${{ steps.scrumbot_analysis.outputs.structured_output }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Extract the analysis output (passed via env to prevent injection)
+            const analysisOutput = process.env.ANALYSIS_OUTPUT || '';
+            console.log('Scrumbot Analysis Length:', analysisOutput.length);
+
+            // Parse the analysis to extract labels and score
+            const lines = analysisOutput.split('\n').filter(line => line.trim());
+            const labels = [];
+            let analysisComment = '';
+            let totalScore = 0;
+            let taskType = '';
+            let priority = '';
+            let effort = '';
+            let phase = '';
+
+            for (const line of lines) {
+              if (line.startsWith('TASK_TYPE:')) {
+                taskType = line.split(':')[1]?.trim();
+                if (taskType) labels.push(taskType);
+              } else if (line.startsWith('PRIORITY:')) {
+                priority = line.split(':')[1]?.trim();
+                if (priority) labels.push(priority);
+              } else if (line.startsWith('EFFORT:')) {
+                effort = line.split(':')[1]?.trim();
+                if (effort) labels.push(effort);
+              } else if (line.startsWith('SPECIAL_MULTIPLIERS:')) {
+                const special = line.split(':')[1]?.trim();
+                if (special && special !== 'none') {
+                  // Handle multiple special labels separated by commas
+                  const specialLabels = special.split(',').map(s => s.trim());
+                  labels.push(...specialLabels);
+                }
+              } else if (line.startsWith('PHASE:')) {
+                phase = line.split(':')[1]?.trim();
+              } else if (line.startsWith('CALCULATION:')) {
+                // Extract total score from calculation
+                const match = line.match(/= ([\d.]+) points/);
+                if (match) {
+                  totalScore = parseFloat(match[1]);
+                }
+              }
+            }
+
+            console.log('Labels to apply:', labels);
+            console.log('Total score:', totalScore);
+            console.log('Phase:', phase);
+
+            const issueNumber = context.payload.issue?.number || context.payload.issue?.number || context.payload.pull_request?.number;
+
+            // Remove the scrumbot label
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                name: '🤖 scrumbot'
+              });
+              console.log('✅ Removed 🤖 scrumbot label');
+            } catch (e) {
+              // Label might not exist, that's ok
+              console.log('Could not remove scrumbot label:', e.message);
+            }
+
+            // Add the new scoring labels to the issue
+            if (labels.length > 0) {
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  labels: labels
+                });
+                console.log('✅ Applied scoring labels to issue:', labels);
+              } catch (e) {
+                console.log('Could not apply labels:', e.message);
+              }
+            }
+
+            // Update issue title with context (no points display)
+            const originalTitle = process.env.ISSUE_TITLE || '';
+            const phaseUpper = phase ? phase.toUpperCase() : 'UNKNOWN';
+            const newTitle = `🤖 ${originalTitle} | ${phaseUpper}`;
+
+            try {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                title: newTitle
+              });
+              console.log('✅ Updated issue title with context');
+            } catch (e) {
+              console.log('Could not update issue title:', e.message);
+            }
+
+            // Format the full analysis as the comment
+            const fullComment = analysisOutput + "\n\n---\n" +
+              "*This issue was analyzed by Scrumbot using the [LABELS.md scoring system](https://github.com/${{ github.repository }}/blob/main/.github/LABELS.md). " +
+              "If the scoring needs adjustment, please update the labels manually.*";
+
+            // Create the analysis comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: fullComment
+            });
+
+      # Handle analysis errors gracefully
+      - name: Handle Analysis Error
+        if: steps.scrumbot_analysis.conclusion != 'success'
+        uses: actions/github-script@v8
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            console.log('Scrumbot encountered an error. Applying basic scoring...');
+
+            const issueNumber = context.payload.issue?.number || context.payload.pull_request?.number;
+
+            // Remove the scrumbot label
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                name: '🤖 scrumbot'
+              });
+              console.log('✅ Removed 🤖 scrumbot label');
+            } catch (e) {
+              // Ignore
+              console.log('Could not remove scrumbot label:', e.message);
+            }
+
+            // Add basic scoring based on simple heuristics (use env vars to prevent injection)
+            const basicLabels = [];
+            const title = (process.env.ISSUE_TITLE || '').toLowerCase();
+            const body = (process.env.ISSUE_BODY || '').toLowerCase();
+
+            // Simple task type detection
+            if (title.includes('bug') || title.includes('error') || title.includes('broken') || title.includes('crash')) {
+              basicLabels.push('🐛 bug-fix');
+            } else if (title.includes('feature') || title.includes('add') || title.includes('implement')) {
+              basicLabels.push('🆕 new-feature');
+            } else if (title.includes('improve') || title.includes('optimize') || title.includes('enhance')) {
+              basicLabels.push('🔧 feature-improvement');
+            } else if (title.includes('security') || title.includes('vulnerability')) {
+              basicLabels.push('🔒 security');
+            } else if (title.includes('performance') || title.includes('slow') || title.includes('speed')) {
+              basicLabels.push('⚡ performance');
+            } else {
+              basicLabels.push('🔧 feature-improvement');
+            }
+
+            // Add priority and effort defaults
+            basicLabels.push('📋 medium');
+            basicLabels.push('🟠 medium');
+
+            // Apply the basic labels to the issue
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: basicLabels
+              });
+              console.log('✅ Applied basic scoring labels to issue:', basicLabels);
+            } catch (e) {
+              console.log('Could not apply basic labels:', e.message);
+            }
+
+            // Update issue title with basic context (no points display)
+            const originalTitle = process.env.ISSUE_TITLE || '';
+            const newTitle = `📋 ${originalTitle} - Basic scrumbot analysis applied with medium priority scoring - Manual review recommended for detailed assessment`;
+
+            try {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                title: newTitle
+              });
+            } catch (e) {
+              // Ignore title update failure
+            }
+
+            // Update with basic comment
+            const fallbackComment = "🤖 **Scrumbot Basic Analysis**\n\n" +
+              "I encountered an error during detailed analysis, but applied basic scoring:\n\n" +
+              "**Labels Applied:**\n" +
+              basicLabels.map(l => "- `" + l + "`").join('\n') + "\n\n" +
+              "**Manual Review Needed:**\n" +
+              "Please review and adjust scoring manually. For detailed analysis, try triggering the workflow manually.\n\n" +
+              "**Points Estimate:** Rough estimate around 8 points based on heuristics.\n\n" +
+              "---\n" +
+              "*Basic scoring applied by Scrumbot. Please verify and update labels manually using the LABELS.md guide.*";
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: fallbackComment
+            });

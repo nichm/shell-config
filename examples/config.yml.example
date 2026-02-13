@@ -1,0 +1,71 @@
+# =============================================================================
+# 📝 SHELL-CONFIG CONFIGURATION EXAMPLE (YAML)
+# =============================================================================
+# Copy this file to: ~/.config/shell-config/config.yml
+# Or run: shell-config init --format yaml
+#
+# Requires yq: brew install yq
+# =============================================================================
+
+# =============================================================================
+# 🎛️ FEATURE FLAGS
+# =============================================================================
+
+features:
+  # Welcome message on new terminal
+  welcome: true
+
+  # Command safety - dangerous command protection
+  command_safety: true
+
+  # Git wrapper - safety checks for git commands
+  git_wrapper: true
+
+  # GHLS - GitHub-style statusline
+  ghls: true
+
+  # Eza - Modern ls replacement
+  eza: true
+
+  # FZF - Fuzzy finder integration
+  fzf: true
+
+  # Ripgrep - Code search aliases
+  ripgrep: true
+
+  # Security hardening - umask and safe wrappers
+  security: true
+
+  # 1Password integration - secrets from vault
+  1password: true
+
+  # Terminal autocomplete - disabled by default (Ghostty compatibility)
+  autocomplete: false
+
+  # Log rotation on shell startup
+  log_rotation: true
+
+# =============================================================================
+# ⏱️ CACHE SETTINGS (in seconds)
+# =============================================================================
+
+cache:
+  # Git secrets scan cache (default: 300 = 5 minutes)
+  secrets_ttl: 300
+
+  # Welcome message cache (default: 60 = 1 minute)
+  welcome_ttl: 60
+
+# =============================================================================
+# 👋 WELCOME MESSAGE SETTINGS
+# =============================================================================
+
+welcome:
+  # Message style: auto, repo, folder, or session
+  style: auto
+
+  # Show autocomplete guide in welcome message
+  autocomplete_guide: true
+
+  # Show keyboard shortcuts in welcome message
+  shortcuts: true

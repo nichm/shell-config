@@ -1,0 +1,18 @@
+# =============================================================================
+# Poutine Configuration - CI/CD Security Scanner
+# =============================================================================
+# Configuration for boostsecurityio/poutine security scanner
+# Docs: https://boostsecurityio.github.io/poutine/
+
+# Skip rules that generate false positives for our setup
+skip:
+  # We intentionally use Ubicloud and BuildJet runners (not GitHub-hosted)
+  # These are managed cloud runners, not truly "self-hosted"
+  - pr_runs_on_self_hosted
+
+# Actions from known organizations we trust
+# Note: poutine flags unverified creators - these are vetted
+allowed_rules: []
+
+# Custom severity thresholds
+# severity: warning  # Only report warnings and above

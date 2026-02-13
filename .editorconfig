@@ -1,0 +1,31 @@
+# EditorConfig for shell-config
+# https://editorconfig.org
+
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+
+# Shell scripts
+[*.sh]
+indent_style = space
+indent_size = 4
+
+# Executable scripts without extension (rm, ghls, shell-config, etc)
+[{rm,ghls,shell-config,shell-config-init,pre-commit,post-commit}]
+indent_style = space
+indent_size = 4
+
+# YAML config files
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# Markdown docs
+[*.md]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = false

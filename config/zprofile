@@ -1,0 +1,22 @@
+#!/bin/zsh
+# =============================================================================
+# Zprofile Configuration
+# Login shell configuration (loaded once on login)
+# =============================================================================
+
+# Python 3.12 from macOS installer
+[[ -d "/Library/Frameworks/Python.framework/Versions/3.12/bin" ]] &&
+	PATH="/Library/Frameworks/Python.framework/Versions/3.12/bin:${PATH}"
+export PATH
+
+# Homebrew environment
+if [[ -f "/opt/homebrew/bin/brew" ]]; then
+	eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+# Elan (Lean theorem prover toolchain manager)
+[[ -d "$HOME/.elan/bin" ]] && export PATH="$HOME/.elan/bin:$PATH"
+
+# Added by OrbStack: command-line tools and integration
+# This won't be added again if you remove it.
+source ~/.orbstack/shell/init.zsh 2>/dev/null || :

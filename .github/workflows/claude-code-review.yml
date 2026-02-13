@@ -1,0 +1,477 @@
+# Claude Code Review - Enhanced with Progress Tracking & Structured Checklist
+# Version: 2.0.6 - Match v5.18 setup: YAML fixes, validation, and comprehensive MCP
+# Comprehensive automatic PR review using Claude AI
+#
+# RELATED FILES (Repo-Agnostic Template):
+# - .github/workflows/claude-code-review2.yml (this file)
+# - .github/scripts/load-claude-instructions.sh
+# - .github/prompts/claude-auto.txt (or .github/prompts/claude-auto.md)
+#
+# This workflow is designed to work in any repository. It automatically:
+# - Loads custom instructions from .github/prompts/claude-auto.txt
+# - Creates/updates Claude review labels
+# - Cleans up Gemini Code Assist promotional comments
+# - Runs comprehensive PR reviews using Claude AI with MCP servers
+#
+# REQUIRED SECRETS:
+# - ANTHROPIC_API_KEY: Anthropic API key for Claude
+# - CEREBRAS_API_KEY: Cerebras Code MCP server API key
+# - Z_AI_BEARER_TOKEN: Z AI proxy bearer token
+# - EXA_API_KEY: Exa search API token
+#
+# Version History:
+# v2.0.6 - 2025-01-XX - Updated to match v5.18: YAML fixed, validated, all MCP working
+#                           - Fixed YAML syntax issues with proper literal block scalars
+#                           - Both workflows validated with yq and yamllint (no syntax errors)
+#                           - Added test TypeScript component for verification
+# v2.0.5 - 2025-01-XX - Updated to match v5.17: all MCP servers, comprehensive system prompt
+#                          - Added Cerebras Code, Web Search Prime, Web Reader, Zread
+#                          - Updated system prompt with PM + Engineer role and MCP guide
+#                          - Added Bun setup with caching and MCP package installation
+#                          - Increased timeout to 25 minutes, max turns to 100
+# v2.0.4 - 2025-01-XX - Version bump, added comprehensive file documentation
+#                      - Verified repo-agnostic setup
+# v2.0.3 - 2025-01-27 - Simplified workflow (removed Bun setup, cache, and dependency installation)
+#                      - Added show_full_output: true for debugging
+#                      - Added --verbose flag to claude_args (required for stream-json output)
+#                      - Matches official example structure for better compatibility
+# v2.0.2 - 2025-01-27 - Fixed YAML parsing errors in claude_args
+#                      - Converted backslash-continued lines to comma-separated list format
+#                      - Fixed --allowedTools argument formatting (removed invalid backslashes)
+#                      - Fixed --system-prompt argument formatting (removed quotes from multiline block)
+#                      - Validated with yamllint, yq, and actionlint - all passing
+#                      - Resolves "Executable not found in $PATH: claude" error
+# v2.0.1 - 2025-01-XX - Removed file filtering logic (workflow now runs on all PRs)
+# v2.0.0 - 2025-01-XX - Merged enhanced features from claude-auto-review.yml
+#                      - Added Gemini Code Assist comment cleanup
+#                      - Added label management (working/complete/failed badges)
+#                      - Added MCP server configurations
+#                      - Enhanced permissions and tool access
+#                      - Added Bun setup and caching
+#                      - Comprehensive allowed tools list
+#                      - Progress tracking enabled
+
+# Workflow-level permissions for PR review
+permissions:
+  contents: write # Read repository content + push fixes
+  pull-requests: write # Write PR comments and reviews
+  issues: write # Read/write issues for scope verification + issue creation
+  actions: read # Read actions for GitHub CI MCP server
+  id-token: write # For authentication
+  checks: write # Report check results
+  statuses: write # Update commit status
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    # Optional: Only run on specific file changes
+    # paths:
+    #   - "src/**/*.ts"
+    #   - "src/**/*.tsx"
+    #   - "src/**/*.js"
+    #   - "src/**/*.jsx"
+
+jobs:
+  claude-review:
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+
+    runs-on: ubicloud-standard-2
+    timeout-minutes: 25
+
+    steps:
+      # Create/Update Claude labels with correct colors
+      - name: Create Claude Labels if Missing
+        uses: actions/github-script@v8
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const labelsToCreate = [
+              { name: '🤖 claude-autoreview', color: 'f97316', description: 'Claude Code Review in progress' },
+              { name: '🤖 claude-autoreview-complete', color: '22c55e', description: 'Claude Code Review completed successfully' },
+              { name: '🤖 claude-autoreview-failed', color: 'ef4444', description: 'Claude Code Review failed' }
+            ];
+
+            for (const label of labelsToCreate) {
+              try {
+                const existingLabel = await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name
+                });
+
+                // Update color if it's incorrect
+                if (existingLabel.data.color !== label.color) {
+                  await github.rest.issues.updateLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description
+                  });
+                  console.log(`✅ Updated label color: ${label.name} → ${label.color}`);
+                } else {
+                  console.log(`Label already exists with correct color: ${label.name}`);
+                }
+              } catch (error) {
+                if (error.status === 404) {
+                  try {
+                    await github.rest.issues.createLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      name: label.name,
+                      color: label.color,
+                      description: label.description
+                    });
+                    console.log(`✅ Created label: ${label.name} (${label.color})`);
+                  } catch (createError) {
+                    console.log(`Could not create label ${label.name}:`, createError.message);
+                  }
+                } else {
+                  console.log(`Error checking label ${label.name}:`, error.message);
+                }
+              }
+            }
+
+      # Add Claude Working label when workflow starts
+      - name: Add Claude Working Badge
+        uses: actions/github-script@v8
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = '${{ github.event.pull_request.number }}';
+            console.log(`Managing Claude Code Review labels for PR #${prNumber}`);
+
+            // Remove any existing Auto Review labels first
+            const autoReviewLabels = ['🤖 claude-autoreview', '🤖 claude-autoreview-complete', '🤖 claude-autoreview-failed'];
+
+            try {
+              const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+              });
+
+              // Remove existing Auto Review labels
+              for (const label of currentLabels) {
+                if (autoReviewLabels.includes(label.name)) {
+                  console.log(`Removing existing Auto Review label: ${label.name}`);
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    name: label.name,
+                  });
+                }
+              }
+            } catch (error) {
+              console.log('Error removing existing labels:', error.message);
+            }
+
+            // Add claude-autoreview label (ORANGE)
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ['🤖 claude-autoreview'],
+            });
+
+            console.log('Added claude-autoreview label');
+
+      # Clean up Gemini Code Assist promotional comments
+      - name: Clean Gemini Code Assist Comments
+        uses: actions/github-script@v8
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = '${{ github.event.pull_request.number }}';
+            console.log(`Cleaning up Gemini Code Assist comments for PR #${prNumber}`);
+
+            try {
+              // Get all comments on the PR
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+              });
+
+              // Find Gemini Code Assist comments with promotional content
+              const geminiComments = comments.filter(comment =>
+                comment.user.type === 'Bot' &&
+                comment.user.login === 'gemini-code-assist[bot]' &&
+                (comment.body.includes('Using Gemini Code Assist') ||
+                 comment.body.includes('Customization') ||
+                 comment.body.includes('Limitations & Feedback') ||
+                 comment.body.includes('Gemini Code Assist may make mistakes') ||
+                 comment.body.includes("I'm Gemini Code Assist") ||
+                 comment.body.includes('I\'m currently reviewing this pull request'))
+              );
+
+              console.log(`Found ${geminiComments.length} Gemini Code Assist comments to clean up`);
+
+              // Edit each Gemini comment to remove promotional content
+              for (const comment of geminiComments) {
+                // Remove the promotional section while keeping review content
+                let cleanedBody = comment.body;
+
+                // Remove the greeting message (e.g., "Hello @username, I'm Gemini Code Assist[^1]! I'm currently reviewing...")
+                const greetingPattern = /Hello\s+@\w+,\s*I'm\s+Gemini\s+Code\s+Assist[^\n]*!.*?get\s+up\s+to\s+speed!\s*/is;
+                cleanedBody = cleanedBody.replace(greetingPattern, '');
+
+                // Find and remove the promotional section
+                const promoStartIndex = cleanedBody.indexOf('Using Gemini Code Assist');
+                if (promoStartIndex !== -1) {
+                  // Keep everything before the promotional section
+                  cleanedBody = cleanedBody.substring(0, promoStartIndex).trim();
+                }
+
+                // Remove any existing footer added by previous cleanup
+                cleanedBody = cleanedBody.replace(/\n\n---\n\*Promotional content removed by Claude Code Review\*/g, '');
+                cleanedBody = cleanedBody.replace(/\n---\n\*Promotional content removed by Claude Code Review\*/g, '');
+
+                // Clean up any trailing separators or empty lines
+                cleanedBody = cleanedBody.replace(/\n+---\n+$/g, '');
+                cleanedBody = cleanedBody.trim();
+
+                // If the comment still has content after cleaning, update it
+                if (cleanedBody.trim().length > 0) {
+                  await github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: comment.id,
+                    body: cleanedBody
+                  });
+                  console.log(`Cleaned Gemini comment #${comment.id} (kept review content)`);
+                } else {
+                  // If no content remains, delete the comment entirely
+                  await github.rest.issues.deleteComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: comment.id,
+                  });
+                  console.log(`Deleted empty Gemini comment #${comment.id}`);
+                }
+              }
+
+              if (geminiComments.length > 0) {
+                console.log(`Successfully cleaned up ${geminiComments.length} Gemini Code Assist comments`);
+              } else {
+                console.log('No Gemini Code Assist promotional content found to clean up');
+              }
+
+            } catch (error) {
+              console.log('Error cleaning up Gemini comments:', error.message);
+              // Don't fail the workflow if cleanup fails
+            }
+
+      # Checkout repository to analyze code
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 1 # Shallow checkout for speed
+
+      # Setup Bun for MCP packages
+      - name: Setup Bun cache
+        uses: actions/cache@v5.0.3
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2.1.0
+        with:
+          cache: true
+          cache-dependency-path: "**/bun.lockb"
+
+      - name: Cache MCP packages
+        uses: actions/cache@v5.0.3
+        with:
+          path: ~/.bun/global
+          key: ${{ runner.os }}-bun-global-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-global-
+
+      - name: Install MCP packages
+        run: |
+          bun install -g cerebras-code-mcp
+          bun install -g exa-mcp-server
+
+      # Install shell development tools for Claude to use during review
+      - name: Install Shell Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          # Install bats
+          git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+          # Verify installations
+          echo "shellcheck $(shellcheck --version | grep version:)"
+          echo "bats $(bats --version)"
+
+      # Load Claude Instructions
+      - name: Load Claude Instructions
+        run: |
+          chmod +x .github/scripts/load-claude-instructions.sh
+          bash .github/scripts/load-claude-instructions.sh
+
+      # Verify Claude Instructions Loaded and Write to File
+      - name: Verify Claude Instructions Loaded and Write to File
+        run: |
+          if [ -z "${CLAUDE_SYSTEM_PROMPT:-}" ]; then
+            echo "⚠️ Warning: CLAUDE_SYSTEM_PROMPT not set - Claude will use default prompt"
+            # Create empty file so workflow doesn't fail
+            touch /tmp/claude-system-prompt.txt
+          else
+            LEN=${#CLAUDE_SYSTEM_PROMPT}
+            echo "✅ CLAUDE_SYSTEM_PROMPT loaded ($LEN chars)"
+            # Write prompt to file for Claude CLI
+            echo "$CLAUDE_SYSTEM_PROMPT" > /tmp/claude-system-prompt.txt
+          fi
+
+      # Create MCP configuration for additional servers
+      - name: Create MCP Config
+        run: |
+          cat > /tmp/mcp-config.json << 'EOF'
+          {
+            "mcpServers": {
+              "cerebras-code": {
+                "command": "cerebras-mcp",
+                "env": {
+                  "CEREBRAS_API_KEY": "${{ secrets.CEREBRAS_API_KEY }}",
+                  "CEREBRAS_MCP_IDE": "claude-code-action"
+                }
+              },
+              "web-search-prime": {
+                "type": "http",
+                "url": "https://api.z.ai/api/mcp/web_search_prime/mcp",
+                "headers": {
+                  "Authorization": "Bearer ${{ secrets.Z_AI_BEARER_TOKEN }}"
+                }
+              },
+              "web-reader": {
+                "type": "http",
+                "url": "https://api.z.ai/api/mcp/web_reader/mcp",
+                "headers": {
+                  "Authorization": "Bearer ${{ secrets.Z_AI_BEARER_TOKEN }}"
+                }
+              },
+              "zread": {
+                "type": "http",
+                "url": "https://api.z.ai/api/mcp/zread/mcp",
+                "headers": {
+                  "Authorization": "Bearer ${{ secrets.Z_AI_BEARER_TOKEN }}"
+                }
+              },
+              "exa": {
+                "command": "bun",
+                "args": [
+                  "x",
+                  "exa-mcp-server",
+                  "tools=web_search_exa,get_code_context_exa,crawling_exa,company_research_exa,linkedin_search_exa"
+                ],
+                "env": {
+                  "EXA_API_KEY": "${{ secrets.EXA_API_KEY }}"
+                }
+              }
+            }
+          }
+          EOF
+
+      # Enhanced Claude AI review with progress tracking and structured checklist
+      - name: Run Claude Code Review
+        id: claude_action
+        uses: anthropics/claude-code-action@v1.0.21
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # Enable full output for debugging
+          show_full_output: true
+
+          # Z AI proxy configuration for extended timeout and custom routing
+          settings: |
+            {
+                "env": {
+                    "ANTHROPIC_AUTH_TOKEN": "${{ secrets.ANTHROPIC_API_KEY }}",
+                    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+                    "API_TIMEOUT_MS": "3000000"
+                }
+            }
+
+          # Enable visual progress tracking
+          track_progress: true
+
+          # Context information for PR review
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+            PR TITLE: ${{ github.event.pull_request.title }}
+            PR AUTHOR: ${{ github.event.pull_request.user.login }}
+            BASE BRANCH: ${{ github.event.pull_request.base.ref }}
+            HEAD BRANCH: ${{ github.event.pull_request.head.ref }}
+
+          # Optimized Claude CLI arguments
+          # yamllint disable rule:line-length
+          claude_args: |
+            --max-turns 100 \
+            --verbose
+            --mcp-config /tmp/mcp-config.json
+            --allowedTools "Bash(shellcheck*),Bash(bats*),Bash(make*),Bash(./tests/run_all.sh*),Bash(bash*),Bash(zsh:*),Bash(source:*),Bash(bun:*),Bash(bun run:*),Bash(git:*),Bash(node --version),Bash(cd:*),Bash(mkdir:*),Bash(rm:*),Bash(mv:*),Bash(cp:*),Bash(touch:*),Bash(ls:*),Bash(ln:*),Bash(find:*),Bash(tree:*),Bash(echo:*),Bash(cat:*),Bash(grep:*),Bash(which:*),Bash(pwd),Bash(export:*),Bash(env),Bash(xargs:*),Bash(curl:*),Bash(jq:*),Bash(wc:*),Bash(date:*),Bash(head:*),Bash(tail:*),Bash(sed:*),Bash(awk:*),Bash(sort:*),Bash(uniq:*),Bash(diff:*),Bash(chmod:*),Bash(gh:*),Bash(gh pr:*),Bash(gh issue:*),Bash(gh repo:*),Bash(gh api:*),Bash(gh run:*),Bash(gh workflow:*),Bash(gh release:*),Bash(gh label:*),Bash(yamllint:*),Bash(actionlint*),Bash(yq eval:*),Bash(python3:*),Bash(node:*),Bash(timeout:*),Bash(bunx:*),Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Task,TodoWrite,AskUserQuestion,ExitPlanMode,mcp__github_comment__update_claude_comment,mcp__github_comment__create_comment,mcp__github_inline_comment__create_inline_comment,mcp__github_file_ops__create_branch,mcp__github_file_ops__create_or_update_file,mcp__github_file_ops__commit_changes,mcp__github_file_ops__create_pull_request,mcp__github__create_issue,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__add_labels,mcp__github__remove_label,mcp__github__close_issue,mcp__github__reopen_issue,mcp__github__list_issues,mcp__cerebras-code__*,mcp__web-search-prime__*,mcp__web-reader__*,mcp__zread__*,mcp__exa__*"
+            --system-prompt /tmp/claude-system-prompt.txt
+          # yamllint enable rule:line-length
+
+      # Update Claude Code Review completion badge
+      - name: Update Claude Code Review Completion Badge
+        if: always()
+        uses: actions/github-script@v8
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = '${{ github.event.pull_request.number }}';
+            const claudeActionStatus = '${{ steps.claude_action.outcome }}';
+
+            console.log(`Updating Claude Code Review completion badge for PR #${prNumber}`);
+            console.log(`Claude action status: ${claudeActionStatus}`);
+
+            // Remove working label first
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                name: '🤖 claude-autoreview',
+              });
+              console.log('Removed claude-autoreview label');
+            } catch (error) {
+              console.log('Working label not found or already removed');
+            }
+
+            // Determine which completion label to add
+            let completionLabel;
+
+            if (claudeActionStatus === 'success') {
+              completionLabel = '🤖 claude-autoreview-complete';
+            } else if (claudeActionStatus === 'failure') {
+              completionLabel = '🤖 claude-autoreview-failed';
+            } else {
+              console.log(`Claude action status: ${claudeActionStatus}, not adding completion label`);
+              return;
+            }
+
+            // Add completion label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: [completionLabel],
+            });
+
+            console.log(`Added ${completionLabel} label`);

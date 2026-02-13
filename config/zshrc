@@ -1,0 +1,23 @@
+#!/bin/zsh
+# =============================================================================
+# 🚀 ZSHRC - Main ZSH Configuration (Symlinked from shell-config)
+# =============================================================================
+# This file is tracked in git and symlinked to ~/.zshrc
+# Put sensitive data (API keys) in ~/.zshrc.local (gitignored)
+# =============================================================================
+
+# === SHELL-CONFIG ===
+source "$HOME/.shell-config/init.sh"
+[ -f ~/.zshrc.local ] && source ~/.zshrc.local
+# === END SHELL-CONFIG ===
+
+# =============================================================================
+# ✅ Load Complete Message (optional - comment out if too verbose)
+# =============================================================================
+# echo "✅ Shell configuration loaded from ~/.shell-config"
+
+# bun completions
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
+
+# UV environment (Python)
+[[ -f "$HOME/.local/bin/env" ]] && source "$HOME/.local/bin/env"

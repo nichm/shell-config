@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 🔧 SHELL-CONFIG CLI - Configuration Management Tool
+# =============================================================================
+# Manages shell-config configuration and provides diagnostic information
+#
+# Usage:
+#   shell-config <command> [options]
+#
+# Commands:
+#   init        Initialize configuration file
+#   status      Show current configuration
+#   validate    Validate configuration
+#   help        Show help message
+# =============================================================================
+
+set -euo pipefail
+
+# Get the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source canonical colors library
+if [[ -f "$SCRIPT_DIR/../core/colors.sh" ]]; then
+    # shellcheck source=../core/colors.sh
+    source "$SCRIPT_DIR/../core/colors.sh"
+else
+    # Fallback colors if running outside shell-config context
+    readonly RED='\033[0;31m'
+    readonly NC='\033[0m'
+fi
+
+# =============================================================================
+# 💡 USAGE
+# =============================================================================
+
+usage() {
+    cat <<EOF
+SHELL-CONFIG - Configuration Management Tool
+
+USAGE:
+    shell-config <command> [options]
+
+COMMANDS:
+    init [--format FORMAT]  Initialize configuration file
+    status                   Show current configuration
+    validate                 Validate configuration
+    doctor                   Run diagnostic checks
+    --version, -v            Show version number
+    help                     Show this help message
+
+EXAMPLES:
+    shell-config init                    # Create simple config
+    shell-config init --format yaml      # Create YAML config
+    shell-config status                  # Show current settings
+    shell-config validate                # Validate configuration
+    shell-config --version               # Show version
+
+CONFIG FILE LOCATIONS:
+    ~/.config/shell-config/config        (simple format)
+    ~/.config/shell-config/config.yml    (YAML format)
+
+For more information, see:
+    https://github.com/YOUR_GITHUB_ORG/shell-config
+EOF
+}
+
+show_version() {
+    local version_file
+    # Find VERSION file relative to script location
+    version_file="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/VERSION"
+    if [[ -f "$version_file" ]]; then
+        echo "shell-config v$(cat "$version_file" | tr -d '\n')"
+    else
+        echo "shell-config version unknown (VERSION file not found)"
+        echo "Expected at: $version_file" >&2
+        return 1
+    fi
+}
+
+# =============================================================================
+# 📋 SHOW STATUS
+# =============================================================================
+
+show_status() {
+    # Source config loader if available
+    local config_loader="$SCRIPT_DIR/../core/config.sh"
+    if [[ -f "$config_loader" ]]; then
+        source "$config_loader"
+        shell_config_show_config
+    else
+        echo "ERROR: Configuration loader not found: $config_loader" >&2
+        echo "WHY: Cannot display shell-config status without the core configuration module" >&2
+        echo "FIX: Verify shell-config is installed correctly or reinstall with ./install.sh" >&2
+        return 1
+    fi
+}
+
+# =============================================================================
+# ✅ VALIDATE CONFIG
+# =============================================================================
+
+validate_config() {
+    echo ""
+    echo "🔍 Validating shell-config configuration..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    # Source config loader if available
+    local config_loader="$SCRIPT_DIR/../core/config.sh"
+    if [[ ! -f "$config_loader" ]]; then
+        echo "ERROR: Configuration loader not found: $config_loader" >&2
+        echo "WHY: Cannot validate configuration without the core configuration module" >&2
+        echo "FIX: Verify shell-config is installed correctly or reinstall with ./install.sh" >&2
+        return 1
+    fi
+
+    source "$config_loader"
+
+    # Run validation
+    if shell_config_validate_config; then
+        log_success "Configuration is valid ✓"
+        echo ""
+        return 0
+    else
+        log_error "Configuration validation failed ✗"
+        echo ""
+        return 1
+    fi
+}
+
+# =============================================================================
+# 🚀 MAIN
+# =============================================================================
+
+main() {
+    if [[ $# -eq 0 ]]; then
+        usage
+        exit 0
+    fi
+
+    local command="$1"
+    shift
+
+    case "$command" in
+    init)
+        exec "$SCRIPT_DIR/shell-config-init" "$@"
+        ;;
+    status)
+        show_status
+        ;;
+    validate)
+        validate_config
+        ;;
+    doctor)
+        # Source doctor if available
+        local doctor_script="$SCRIPT_DIR/../doctor.sh"
+        if [[ -f "$doctor_script" ]]; then
+            source "$doctor_script"
+            shell_config_doctor
+        else
+            echo "Doctor script not found"
+            exit 1
+        fi
+        ;;
+    --version | -v | version)
+        show_version
+        ;;
+    help | --help | -h)
+        usage
+        ;;
+    *)
+        echo -e "${RED}❌ Unknown command: $command${NC}"
+        echo ""
+        usage
+        exit 1
+        ;;
+    esac
+}
+
+main "$@"

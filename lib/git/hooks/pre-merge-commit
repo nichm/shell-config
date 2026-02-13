@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 🔒 PRE-MERGE-COMMIT HOOK - Validate Merge Commit Integrity
+# =============================================================================
+# Runs before completing a merge commit to ensure quality:
+#   1. Detect merge conflict markers
+#   2. Run tests on merged code
+# Bypass: git merge --no-verify
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Source hook bootstrap (environment setup)
+# =============================================================================
+# Resolve symlinks so relative paths work from installed (~/.githooks/) location
+# shellcheck source=../shared/hook-bootstrap.sh
+_hook_real="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+source "$(dirname "$_hook_real")/../shared/hook-bootstrap.sh"
+unset _hook_real
+
+# =============================================================================
+# Source shared utilities
+# =============================================================================
+# Paths to validation modules (using SHELL_CONFIG_DIR from bootstrap)
+VALIDATION_SHARED="${SHELL_CONFIG_DIR}/lib/validation/shared"
+# shellcheck source=../../validation/shared/file-operations.sh
+source "${VALIDATION_SHARED}/file-operations.sh"
+
+# shellcheck source=../shared/reporters.sh
+source "${SHARED_DIR}/reporters.sh"
+# shellcheck source=../shared/validation-loop.sh
+source "${SHARED_DIR}/validation-loop.sh"
+
+# =============================================================================
+# 1. Check for merge conflict markers
+# =============================================================================
+report_hook_start "pre-merge-commit" "Checking for merge conflict markers"
+
+# Check for conflict markers in staged files
+check_conflict_markers() {
+    local file="$1"
+    local conflict_markers=("<<<<<<< " "======= " ">>>>>>> ")
+
+    for marker in "${conflict_markers[@]}"; do
+        if file_contains_string "$file" "$marker"; then
+            report_validation_error "$file" "" "Merge conflict marker detected" "Found: $marker"
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Run check on all staged files
+if ! run_validation_on_staged "check_conflict_markers"; then
+    hook_fail "Merge conflict markers detected" "git merge --no-verify"
+fi
+
+# =============================================================================
+# 2. Run tests on merged code (warning only - does not block merge)
+# =============================================================================
+# Check if we're in a Node.js project (has package.json)
+if [[ -f "package.json" ]]; then
+    report_info "Running tests on merged code..."
+
+    # Check if test script exists
+    if grep -q '"test":' package.json 2>/dev/null; then
+        if command_exists "bun"; then
+            if ! _portable_timeout "${SC_HOOK_TIMEOUT_LONG:-60}" bun run test --silent >/dev/null 2>&1; then
+                log_warning "Tests failed - consider fixing before pushing"
+            else
+                report_validation_success "Tests passed"
+            fi
+        else
+            log_warning "Bun not found - skipping tests"
+        fi
+    else
+        report_info "No test script found - skipping tests"
+    fi
+else
+    report_info "Not a Node.js project - skipping tests"
+fi
+
+# =============================================================================
+# All checks passed
+# =============================================================================
+report_hook_success "pre-merge-commit"
+exit 0

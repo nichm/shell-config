@@ -1,0 +1,408 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 🔧 SHELL-CONFIG INIT - Initialize Configuration File
+# =============================================================================
+# Creates a default configuration file for shell-config
+# Usage:
+#   shell-config init [--format simple|yaml] [--force]
+# Examples:
+#   shell-config init              # Create simple config (default)
+#   shell-config init --format yaml  # Create YAML config
+#   shell-config init --force      # Overwrite existing config
+# =============================================================================
+
+# Ensure command_exists is available
+declare -f command_exists &>/dev/null || command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+set -euo pipefail
+
+# Get the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../core/colors.sh"
+
+# =============================================================================
+# 📋 CONFIGURATION
+# =============================================================================
+
+FORMAT="${FORMAT:-simple}"
+FORCE=false
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/shell-config"
+CONFIG_FILE=""
+CONFIG_FILE_YAML="$CONFIG_DIR/config.yml"
+CONFIG_FILE_SIMPLE="$CONFIG_DIR/config"
+
+# =============================================================================
+# 💡 USAGE
+# =============================================================================
+
+usage() {
+    cat <<EOF
+USAGE:
+    shell-config init [OPTIONS]
+
+OPTIONS:
+    --format FORMAT    Config file format: 'simple' or 'yaml' (default: simple)
+    --force           Overwrite existing configuration file
+    -h, --help        Show this help message
+
+EXAMPLES:
+    shell-config init
+    shell-config init --format yaml
+    shell-config init --force
+
+CONFIG FILE LOCATIONS:
+    Simple format: ~/.config/shell-config/config
+    YAML format:   ~/.config/shell-config/config.yml
+
+    Falls back to ~/.shell-config.conf or ~/.shell-config/config.* if XDG not available
+EOF
+}
+
+# =============================================================================
+# 📖 PARSE ARGUMENTS
+# =============================================================================
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+        esac
+    done
+
+    # Validate format
+    if [[ "$FORMAT" != "simple" && "$FORMAT" != "yaml" ]]; then
+        log_error "Invalid format: $FORMAT (must be 'simple' or 'yaml')"
+        exit 1
+    fi
+}
+
+# =============================================================================
+# 📁 DETERMINE CONFIG FILE PATH
+# =============================================================================
+
+determine_config_path() {
+    if [[ "$FORMAT" == "yaml" ]]; then
+        CONFIG_FILE="$CONFIG_FILE_YAML"
+    else
+        CONFIG_FILE="$CONFIG_FILE_SIMPLE"
+    fi
+}
+
+# =============================================================================
+# ✅ CHECK EXISTING CONFIG
+# =============================================================================
+
+check_existing_config() {
+    if [[ -f "$CONFIG_FILE" && "$FORCE" != "true" ]]; then
+        log_error "Configuration file already exists: $CONFIG_FILE"
+        log_error "Use --force to overwrite"
+        exit 1
+    fi
+}
+
+# =============================================================================
+# 📝 CREATE SIMPLE CONFIG
+# =============================================================================
+
+create_simple_config() {
+    mkdir -p "$CONFIG_DIR"
+
+    cat >"$CONFIG_FILE" <<'EOF'
+# =============================================================================
+# 📝 SHELL-CONFIG CONFIGURATION
+# =============================================================================
+# Simple key=value format configuration file
+# Location: ~/.config/shell-config/config
+# All values are optional. Uncomment and modify as needed.
+# Lines starting with # are comments and are ignored.
+# Configuration priority (highest to lowest):
+#   1. Environment variables (set in ~/.zshrc.local)
+#   2. YAML config file (if using YAML format)
+#   3. This file (simple key=value format)
+#   4. Default values (hardcoded in scripts)
+# Boolean values: Use 'true' or 'false' (lowercase, no quotes)
+# Integer values: Use numbers only (no quotes)
+# String values: Use values without quotes, or quoted if containing spaces
+# =============================================================================
+
+# =============================================================================
+# 🎛️ FEATURE FLAGS
+# =============================================================================
+# Enable or disable specific shell-config features
+# Set to 'false' to disable a feature
+
+# Welcome message on new terminal (default: true)
+WELCOME_ENABLED=true
+
+# Command safety - dangerous command protection (default: true)
+COMMAND_SAFETY_ENABLED=true
+
+# Git wrapper - safety checks for git commands (default: true)
+GIT_WRAPPER_ENABLED=true
+
+# GHLS - GitHub-style statusline (default: true)
+GHLS_ENABLED=true
+
+# Eza - Modern ls replacement (default: true)
+EZA_ENABLED=true
+
+# FZF - Fuzzy finder integration (default: true)
+FZF_ENABLED=true
+
+# Ripgrep - Code search aliases (default: true)
+RIPGREP_ENABLED=true
+
+# Security hardening - umask and safe wrappers (default: true)
+SECURITY_ENABLED=true
+
+# 1Password integration - secrets from vault (default: true)
+1PASSWORD_ENABLED=true
+
+# Terminal autocomplete - disabled by default (Ghostty compatibility)
+AUTOCOMPLETE_ENABLED=false
+
+# Log rotation on shell startup (default: true)
+LOG_ROTATION=true
+
+# =============================================================================
+# ⏱️ CACHE SETTINGS (in seconds)
+# =============================================================================
+# How long to cache expensive operations
+
+# Git secrets scan cache (default: 300 = 5 minutes)
+SECRETS_CACHE_TTL=300
+
+# Welcome message cache (default: 60 = 1 minute)
+WELCOME_CACHE_TTL=60
+
+# =============================================================================
+# 👋 WELCOME MESSAGE SETTINGS
+# =============================================================================
+# Customize the welcome message behavior
+
+# Welcome message style: auto, repo, folder, or session (default: auto)
+#   auto:   Automatically detect the best style
+#   repo:   Show git repository information
+#   folder: Show current folder details
+#   session: Show only once per shell session
+WELCOME_STYLE=auto
+
+# Show autocomplete guide in welcome message (default: true)
+AUTOCOMPLETE_GUIDE=true
+
+# Show keyboard shortcuts in welcome message (default: true)
+SHORTCUTS=true
+
+# =============================================================================
+# 📊 CUSTOMIZATION EXAMPLES
+# =============================================================================
+# Uncomment and modify these examples to customize your experience
+
+# Disable welcome message (faster shell startup)
+# WELCOME_ENABLED=false
+
+# Increase cache TTL for slower systems (10 minutes)
+# SECRETS_CACHE_TTL=600
+# WELCOME_CACHE_TTL=600
+
+# Show welcome message only once per session
+# WELCOME_STYLE=session
+
+# Disable autocomplete for faster startup
+# AUTOCOMPLETE_ENABLED=false
+# AUTOCOMPLETE_GUIDE=false
+EOF
+
+    log_success "Configuration file created: $CONFIG_FILE"
+}
+
+# =============================================================================
+# 📝 CREATE YAML CONFIG
+# =============================================================================
+
+create_yaml_config() {
+    mkdir -p "$CONFIG_DIR"
+
+    cat >"$CONFIG_FILE" <<'EOF'
+# =============================================================================
+# 📝 SHELL-CONFIG CONFIGURATION (YAML)
+# =============================================================================
+# YAML format configuration file (requires yq command)
+# Location: ~/.config/shell-config/config.yml
+# All values are optional. Uncomment and modify as needed.
+# Comments start with # and are ignored.
+# Configuration priority (highest to lowest):
+#   1. Environment variables (set in ~/.zshrc.local)
+#   2. This file (YAML format)
+#   3. Simple config file (key=value format)
+#   4. Default values (hardcoded in scripts)
+# Boolean values: true or false (lowercase, no quotes)
+# Integer values: numbers (no quotes)
+# String values: text (optional quotes)
+# NOTE: Key names match the simple config format for consistency.
+#       They are converted to SHELL_CONFIG_* environment variables.
+# =============================================================================
+
+# =============================================================================
+# 🎛️ FEATURE FLAGS
+# =============================================================================
+# Enable or disable specific shell-config features
+# Set to false to disable a feature
+
+# Welcome message on new terminal (default: true)
+welcome_enabled: true
+
+# Command safety - dangerous command protection (default: true)
+command_safety_enabled: true
+
+# Git wrapper - safety checks for git commands (default: true)
+git_wrapper_enabled: true
+
+# GHLS - GitHub-style statusline (default: true)
+ghls_enabled: true
+
+# Eza - Modern ls replacement (default: true)
+eza_enabled: true
+
+# FZF - Fuzzy finder integration (default: true)
+fzf_enabled: true
+
+# Ripgrep - Code search aliases (default: true)
+ripgrep_enabled: true
+
+# Security hardening - umask and safe wrappers (default: true)
+security_enabled: true
+
+# 1Password integration - secrets from vault (default: true)
+one_password_enabled: true
+
+# Terminal autocomplete - disabled by default (Ghostty compatibility)
+autocomplete_enabled: false
+
+# Log rotation on shell startup (default: true)
+log_rotation: true
+
+# =============================================================================
+# ⏱️ CACHE SETTINGS (in seconds)
+# =============================================================================
+# How long to cache expensive operations
+
+# Git secrets scan cache (default: 300 = 5 minutes)
+secrets_cache_ttl: 300
+
+# Welcome message cache (default: 60 = 1 minute)
+welcome_cache_ttl: 60
+
+# =============================================================================
+# 👋 WELCOME MESSAGE SETTINGS
+# =============================================================================
+# Customize the welcome message behavior
+
+# Welcome message style: auto, repo, folder, or session (default: auto)
+#   auto:    Automatically detect the best style
+#   repo:    Show git repository information
+#   folder:  Show current folder details
+#   session: Show only once per shell session
+welcome_style: auto
+
+# Show autocomplete guide in welcome message (default: true)
+autocomplete_guide: true
+
+# Show keyboard shortcuts in welcome message (default: true)
+shortcuts: true
+
+# =============================================================================
+# 📊 CUSTOMIZATION EXAMPLES
+# =============================================================================
+# Uncomment and modify these examples to customize your experience
+
+# Disable welcome message for faster shell startup:
+# welcome_enabled: false
+
+# Increase cache TTL for slower systems:
+# secrets_cache_ttl: 600  # 10 minutes
+# welcome_cache_ttl: 600
+
+# Show welcome message only once per session:
+# welcome_style: session
+
+# Disable autocomplete for faster startup:
+# autocomplete_enabled: false
+# autocomplete_guide: false
+EOF
+
+    log_success "Configuration file created: $CONFIG_FILE"
+}
+
+# =============================================================================
+# 📋 SHOW NEXT STEPS
+# =============================================================================
+
+show_next_steps() {
+    echo ""
+    log_info "Configuration file created successfully!"
+    echo ""
+    echo "What's next:"
+    echo "  1. Edit the config file to customize your settings:"
+    echo "     $CONFIG_FILE"
+    echo ""
+    echo "  2. Reload your shell to apply changes:"
+    echo "     source ~/.zshrc"
+    echo ""
+    echo "  3. Or restart your terminal"
+    echo ""
+    echo "View current configuration:"
+    echo "  shell-config status"
+    echo ""
+    echo "Validate configuration:"
+    echo "  shell-config validate"
+    echo ""
+}
+
+# =============================================================================
+# 🚀 MAIN
+# =============================================================================
+
+main() {
+    parse_args "$@"
+    determine_config_path
+    check_existing_config
+
+    log_info "Creating shell-config configuration..."
+    echo ""
+
+    if [[ "$FORMAT" == "yaml" ]]; then
+        if ! command_exists "yq"; then
+            if [[ "${SHELL_CONFIG_INIT_CONTINUE_WITHOUT_YQ:-}" != "true" ]]; then
+                echo "❌ ERROR: yq command not found - YAML config will not be loaded" >&2
+                echo "ℹ️  WHY: yq is required to parse YAML configuration files" >&2
+                echo "💡 FIX: brew install yq, or set SHELL_CONFIG_INIT_CONTINUE_WITHOUT_YQ=true to skip" >&2
+                exit 1
+            fi
+            log_warning "yq not found - continuing anyway (SHELL_CONFIG_INIT_CONTINUE_WITHOUT_YQ=true)"
+        fi
+        create_yaml_config
+    else
+        create_simple_config
+    fi
+
+    show_next_steps
+}
+
+main "$@"

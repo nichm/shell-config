@@ -1,0 +1,47 @@
+# =============================================================================
+# markdownlint Configuration
+# =============================================================================
+# Markdown linting rules for documentation quality
+# Usage: markdownlint '**/*.md'
+# =============================================================================
+
+# Default state for all rules
+default: true
+
+# MD013 - Line length (disabled - docs often have long lines)
+MD013: false
+
+# MD024 - Multiple headings with same content (allow siblings)
+MD024:
+  siblings_only: true
+
+# MD033 - Inline HTML (allow for badges, details, etc.)
+MD033: false
+
+# MD036 - Emphasis used instead of heading (disabled for footer text)
+MD036: false
+
+# MD040 - Fenced code blocks should have language (disabled)
+MD040: false
+
+# MD041 - First line should be a heading (disabled for CHANGELOG)
+MD041: false
+
+# MD046 - Code block style (fenced)
+MD046:
+  style: fenced
+
+# MD048 - Code fence style (backtick)
+MD048:
+  style: backtick
+
+# MD049 - Emphasis style (asterisks)
+MD049:
+  style: asterisk
+
+# MD050 - Strong style (asterisks)
+MD050:
+  style: asterisk
+
+# MD060 - Table column style (disabled - compact tables are fine)
+MD060: false

@@ -1,0 +1,64 @@
+# Windsurf AI - Indexing Optimization
+# Focus: Exclude large/sensitive directories from AI context
+
+# Large dependencies (avoid context bloat)
+node_modules/
+.pnpm-store
+bower_components/
+
+# Build outputs (no need to index generated files)
+dist/
+build/
+out/
+.next/
+.cache/
+.parcel-cache/
+
+# Environment files (security)
+.env*
+!.env.example
+!.env.template
+
+# Logs and temporary data
+logs/
+*.log
+tmp/
+temp/
+
+# Testing and coverage
+coverage/
+*.lcov
+.nyc_output/
+
+# Binary files (can't analyze in text)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.svg
+*.webp
+*.pdf
+*.zip
+*.tar.gz
+*.mp4
+*.avi
+*.mov
+
+# Large datasets
+finance/statements/
+finance/extracted_data/
+finance/data/
+
+# Version control (already handled by Git)
+.git/
+.gitignore
+
+# Cache and runtime files
+*.pid
+*.seed
+.eslintcache
+.stylelintcache
+
+# Project-specific large directories
+mcp-server-browserbase/ 

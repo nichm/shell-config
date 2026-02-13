@@ -1,0 +1,41 @@
+# Added by OrbStack: 'orb' SSH host for Linux machines
+# This only works if it's at the top of ssh_config (before any Host blocks).
+# This won't be added again if you remove it.
+Include ~/.orbstack/ssh/config
+
+# =============================================================================
+# LOCAL SERVER CONFIG (gitignored — add your servers in ssh-config.local)
+# =============================================================================
+# IMPORTANT: Include MUST be before any Host blocks to apply globally.
+# Create config/ssh-config.local with your Host blocks.
+# See config/personal.env.example for setup instructions.
+# Example:
+#   Host my-vps
+#       HostName your-vps-ip
+#       User root
+#       IdentityFile ~/.ssh/my_vps.pub
+#       IdentitiesOnly yes
+# =============================================================================
+Include ~/.shell-config/config/ssh-config.local
+
+# =============================================================================
+# SSH Client Configuration - 1Password SSH Agent
+# =============================================================================
+
+# Default: Use 1Password SSH Agent for all hosts
+Host *
+    IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+    AddKeysToAgent yes
+    # Performance optimizations
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    Compression yes
+    # Disable GSSAPI (can cause slowdowns)
+    GSSAPIAuthentication no
+
+# GitHub - use specific key to avoid "too many auth failures"
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/github.pub
+    IdentitiesOnly yes

@@ -1,0 +1,54 @@
+# =============================================================================
+# GIT CONFIGURATION - Template (customize user section for your setup)
+# =============================================================================
+# This file is symlinked to ~/.gitconfig by install.sh
+# Customize the [user] section with your own name and email
+# =============================================================================
+
+[user]
+	# Defaults — override in config/gitconfig.local (not committed)
+	name = Your Name
+	email = your-email@example.com
+[init]
+	defaultBranch = main
+[core]
+	editor = nano
+	hooksPath = ~/.githooks
+	# Custom hooks directory - install.sh ensures hooks are available here
+[pull]
+	rebase = false
+# =============================================================================
+# LFS CONFIGURATION (optional - uncomment if using git-lfs)
+# =============================================================================
+# [filter "lfs"]
+#	process = git-lfs filter-process
+#	required = true
+#	clean = git-lfs clean -- %f
+#	smudge = git-lfs smudge -- %f
+
+# =============================================================================
+# CREDENTIAL HELPERS (platform-specific, configure as needed)
+# =============================================================================
+# macOS with GitHub CLI:
+# [credential "https://github.com"]
+#	helper =
+#	helper = !/opt/homebrew/bin/gh auth git-credential
+
+# =============================================================================
+# SECRET DETECTION
+# =============================================================================
+# We use Gitleaks for all secret detection (not git-secrets)
+# Config: lib/validation/validators/security/config/gitleaks.toml
+# The hooks at ~/.githooks use gitleaks automatically
+# =============================================================================
+[hooks]
+	allowLargeCommits = true
+
+# =============================================================================
+# LOCAL OVERRIDES (must be at the end — last value wins in git config)
+# =============================================================================
+# Put your [user] section and credential helpers in config/gitconfig.local
+# See config/personal.env.example for setup instructions
+# =============================================================================
+[include]
+	path = gitconfig.local

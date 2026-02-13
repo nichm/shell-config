@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# =============================================================================
+# SAFE-RM v2 - Ultra-fast PATH-based rm wrapper
+# =============================================================================
+# Intercepts ALL rm calls including 'command rm' by being first in PATH.
+# Optimized for minimal overhead (<1ms on M1 Mac).
+# Features:
+#   - Protected path blocking (instant O(1) prefix matching)
+#   - Async audit logging (non-blocking)
+#   - Optional force confirmation
+# Protection Layers:
+#   1. PATH wrapper (this file) - Blocks 'rm' and 'command rm'
+#   2. Function override (lib/security/rm/wrapper.sh) - Blocks '/bin/rm' in interactive shells
+#   3. chflags protection - Kernel-level immutable files (use protect-file)
+# Bypass Options:
+#   - Interactive: Use 'command /bin/rm' to bypass function override (NOT recommended)
+#   - Scripts: '/bin/rm' bypasses wrapper but not chflags protection
+#   - Emergency: 'sudo chflags noschg <file>' to remove kernel protection
+# Design: The bypass is intentional - provides escape hatch for legitimate needs.
+#         Real security comes from chflags (Layer 3), not wrapper convenience.
+# =============================================================================
+
+set -euo pipefail
+# -e: Exit on error
+# -u: Exit on undefined variable
+# -o pipefail: Exit on pipe failure
+
+# Fast exit for help/version - zero overhead passthrough
+[[ "${1-}" == --help || "${1-}" == --version || "${1-}" == -h ]] && exec /bin/rm "$@"
+
+# Config (inherit from env or use defaults)
+: "${RM_AUDIT_ENABLED:=1}"
+: "${RM_PROTECT_ENABLED:=1}"
+: "${RM_FORCE_CONFIRM:=0}"
+: "${RM_AUDIT_LOG:=$HOME/.rm_audit.log}"
+
+# Source shared protected paths module
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "${SCRIPT_DIR}/lib/core/protected-paths.sh"
+
+# Check for dangerous flags (inline for speed)
+has_dangerous_flags() {
+    for a in "$@"; do
+        case "$a" in
+        -f | -rf | -fr | -Rf | -fR | --force) return 0 ;;
+        -r | -R | --recursive) return 0 ;;
+        -*f* | -*[rR]*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# Main logic - streamlined for speed
+blocked=()
+[[ "$RM_PROTECT_ENABLED" == 1 ]] && {
+    for arg in "$@"; do
+        get_protected_path_type "$arg" >/dev/null && blocked+=("$arg")
+    done
+}
+
+# Block if protected paths found
+((${#blocked[@]})) && {
+    printf '🔴 BLOCKED: Protected path(s):\n' >&2
+    printf '   • %s\n' "${blocked[@]}" >&2
+    printf 'Bypass: /bin/rm %s\n' "$*" >&2
+    [[ "$RM_AUDIT_ENABLED" == 1 ]] && printf '%(%F %T)T BLOCKED: rm %s\n' -1 "$*" >>"$RM_AUDIT_LOG" 2>/dev/null &
+    exit 1
+}
+
+# Audit dangerous operations (async)
+has_dangerous_flags "$@" && {
+    [[ "$RM_AUDIT_ENABLED" == 1 ]] && printf '%(%F %T)T EXEC: rm %s\n' -1 "$*" >>"$RM_AUDIT_LOG" 2>/dev/null &
+
+    # Require explicit confirmation for force operations (non-interactive)
+    [[ "$RM_FORCE_CONFIRM" == 1 && "${RM_ALLOW_FORCE:-}" != "true" ]] && {
+        echo "ERROR: Refusing to remove with dangerous flags without confirmation" >&2
+        echo "WHY: Data loss prevention - force operations can destroy critical files" >&2
+        echo "FIX: Set RM_ALLOW_FORCE=true to override this safety check" >&2
+        printf '     Command: RM_ALLOW_FORCE=true rm %s\n' "$*" >&2
+        exit 1
+    }
+}
+
+# Execute real rm - call /bin/rm directly
+# No need for 'command' prefix: this is a standalone script, not sourced
+# into interactive shells where rm() function override exists.
+# NOTE: 'exec command /bin/rm' fails on Linux where /usr/bin/command
+# may not exist as an external binary (exit code 127).
+exec /bin/rm "$@"

@@ -1,0 +1,60 @@
+{
+  // =============================================================================
+  // Recommended Extensions for Bash Development
+  // =============================================================================
+  // Install these extensions for the best development experience
+  // =============================================================================
+
+  "recommendations": [
+    // -------------------------------------------------------------------------
+    // Essential Tools (Must Have)
+    // -------------------------------------------------------------------------
+    {
+      "name": "timonwong.shellcheck",
+      "description": "ShellCheck integration - Lints bash scripts (like ESLint for JS)",
+      "id": "timonwong.shellcheck"
+    },
+    {
+      "name": "mads-hartmann.bash-ide-vscode",
+      "description": "bash-language-server - Autocomplete, hover docs, go-to-definition",
+      "id": "mads-hartmann.bash-ide-vscode"
+    },
+
+    // -------------------------------------------------------------------------
+    // Testing and Debugging
+    // -------------------------------------------------------------------------
+    {
+      "name": "batista.jekey",
+      "description": "BATS syntax highlighting for test files",
+      "id": "batista.jekey"
+    },
+
+    // -------------------------------------------------------------------------
+    // GitHub Actions
+    // -------------------------------------------------------------------------
+    {
+      "name": "redhat.vscode-yaml",
+      "description": "YAML language support with GitHub Actions schema validation",
+      "id": "redhat.vscode-yaml"
+    },
+    {
+      "name": "github.vscode-github-actions",
+      "description": "GitHub Actions workflow support and syntax highlighting",
+      "id": "github.vscode-github-actions"
+    },
+
+    // -------------------------------------------------------------------------
+    // General Productivity
+    // -------------------------------------------------------------------------
+    {
+      "name": "eamodio.gitlens",
+      "description": "Git supercharged - Blame, code authorship, and repository insights",
+      "id": "eamodio.gitlens"
+    },
+    {
+      "name": "streetsidesoftware.code-spell-checker",
+      "description": "Spelling checker for code and comments",
+      "id": "streetsidesoftware.code-spell-checker"
+    }
+  ]
+}

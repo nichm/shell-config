@@ -1,0 +1,11 @@
+#!/bin/zsh
+# =============================================================================
+# Zsh Environment Configuration
+# Environment variables for all zsh sessions (loaded before .zshrc)
+# =============================================================================
+
+# Cargo (Rust) - only if installed
+[[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
+
+# Elan (Lean theorem prover toolchain manager)
+[[ -d "$HOME/.elan/bin" ]] && export PATH="$HOME/.elan/bin:$PATH"

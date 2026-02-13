@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 📝 COMMIT-MSG HOOK - Commit Message Validation
+# =============================================================================
+# Runs after commit message is written to validate format and quality.
+# Enforces commit message best practices.
+# Checks:
+#   1. Subject line length ≤ 72 characters
+#   2. Non-empty message (not just comments)
+#   3. No trailing whitespace on subject line
+#   4. Optional: Conventional commits format
+# Bypass: git commit --no-verify
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Source hook bootstrap (environment setup)
+# =============================================================================
+# Resolve symlinks so relative paths work from installed (~/.githooks/) location
+# shellcheck source=../shared/hook-bootstrap.sh
+_hook_real="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+source "$(dirname "$_hook_real")/../shared/hook-bootstrap.sh"
+unset _hook_real
+
+# Source git-utils for commit message utilities
+source "$SHARED_DIR/git-utils.sh"
+
+# Configuration
+MAX_SUBJECT_LENGTH=72
+MIN_SUBJECT_LENGTH=3
+ENFORCE_CONVENTIONAL_COMMITS="${GIT_ENFORCE_CONVENTIONAL_COMMITS:-0}"
+
+# Read commit message from file
+commit_msg_file="$1"
+commit_msg=$(cat "$commit_msg_file")
+
+# Strip comments and empty lines
+commit_msg_only=$(strip_commit_comments "$commit_msg")
+
+# Get subject line (first non-empty line)
+subject_line=$(echo "$commit_msg_only" | head -1)
+subject_length=${#subject_line}
+
+# =============================================================================
+# 1. Check for empty message
+# =============================================================================
+if [[ -z "$subject_line" ]]; then
+    log_error "Commit message is empty"
+    log_info "Add a meaningful commit message describing your changes"
+    exit 1
+fi
+
+# =============================================================================
+# 2. Check subject line length
+# =============================================================================
+if [[ $subject_length -gt $MAX_SUBJECT_LENGTH ]]; then
+    log_error "Subject line too long ($subject_length chars, max $MAX_SUBJECT_LENGTH)"
+    log_info "Subject: $subject_line"
+    log_info "Wrap at 72 chars for git log readability"
+    exit 1
+fi
+
+if [[ $subject_length -lt $MIN_SUBJECT_LENGTH ]]; then
+    log_error "Subject line too short ($subject_length chars, min $MIN_SUBJECT_LENGTH)"
+    log_info "Add a more descriptive commit message"
+    exit 1
+fi
+
+# =============================================================================
+# 3. Check for trailing whitespace on subject line
+# =============================================================================
+if [[ "$subject_line" =~ [[:space:]]$ ]]; then
+    log_error "Subject line has trailing whitespace"
+    log_info "Subject: '$subject_line'"
+    log_info "Remove trailing spaces for cleaner git history"
+    exit 1
+fi
+
+# =============================================================================
+# 4. Check subject line doesn't end with period (conventional commits style)
+# =============================================================================
+if [[ "$subject_line" =~ \.$ ]]; then
+    log_warning "Subject line should not end with a period"
+    log_info "Subject: $subject_line"
+    log_info "Remove the period for conventional commits style"
+    # Not blocking - just a warning
+fi
+
+# =============================================================================
+# 5. Optional: Enforce conventional commits format
+# =============================================================================
+if [[ "$ENFORCE_CONVENTIONAL_COMMITS" == "1" ]]; then
+    # Check if subject matches conventional commits format
+    # Format: type(scope): subject
+    if [[ ! "$subject_line" =~ ^([a-z]+)(\(.+\))?:\ .+ ]]; then
+        log_error "Commit message doesn't follow conventional commits format"
+        log_info "Expected format: type(scope): subject"
+        log_info "Example: feat(auth): add OAuth2 login support"
+        log_info ""
+        log_info "Valid types: $(get_conventional_types_list)"
+        log_info ""
+        log_info "To disable conventional commits enforcement:"
+        log_info "  GIT_ENFORCE_CONVENTIONAL_COMMITS=0 git commit -m \"message\""
+        exit 1
+    fi
+
+    # Extract type from subject
+    commit_type=$(echo "$subject_line" | sed -E 's/^([a-z]+).*/\1/')
+
+    # Validate type is in allowed list
+    if ! is_valid_conventional_type "$commit_type"; then
+        log_error "Invalid conventional commit type: $commit_type"
+        log_info "Valid types: $(get_conventional_types_list)"
+        exit 1
+    fi
+
+    log_success "Conventional commits format validated: type=$commit_type"
+fi
+
+# =============================================================================
+# 6. Check for proper blank line between subject and body
+# =============================================================================
+# Check if there's a body (content after first line)
+body_content=$(echo "$commit_msg_only" | tail -n +2)
+if [[ -n "$body_content" ]]; then
+    # There's a body, so verify there's a blank line after the subject
+    # The has_blank_line_after_subject function properly handles comments
+    if ! has_blank_line_after_subject "$commit_msg"; then
+        log_warning "Missing blank line between subject and body"
+        log_info "Add a blank line for better git log readability"
+        # Not blocking - just a warning
+    fi
+fi
+
+# =============================================================================
+# 7. Check for commit message body line length (if body exists)
+# =============================================================================
+if echo "$commit_msg_only" | tail -n +2 | grep -q '.\{73,\}'; then
+    log_warning "Some lines in commit body exceed 72 characters"
+    log_info "Consider wrapping at 72 chars for better git log readability"
+    # Not blocking - just a warning
+fi
+
+# =============================================================================
+# All checks passed
+# =============================================================================
+log_success "Commit message validated ($subject_length chars)"
+exit 0

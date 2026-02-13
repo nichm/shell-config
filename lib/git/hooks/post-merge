@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 🔄 POST-MERGE HOOK - Automatic Dependency Installation
+# =============================================================================
+# Runs after git merge (including git pull) to automatically install dependencies
+# when package.json or other dependency files change.
+# Prevents "why doesn't it work" moments after pulling latest changes.
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Source hook bootstrap (environment setup)
+# =============================================================================
+# Resolve symlinks so relative paths work from installed (~/.githooks/) location
+# shellcheck source=../shared/hook-bootstrap.sh
+_hook_real="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+source "$(dirname "$_hook_real")/../shared/hook-bootstrap.sh"
+unset _hook_real
+
+# Source git-utils for branch utilities
+source "$SHARED_DIR/git-utils.sh"
+
+# Dependency files to check (organized by package manager)
+declare -A DEP_FILES=(
+    ["bun"]="package.json"
+    ["npm"]="package.json"
+    ["pnpm"]="package.json"
+    ["yarn"]="package.json"
+    ["python"]="requirements.txt Pipfile pyproject.toml"
+    ["rust"]="Cargo.toml"
+    ["go"]="go.mod"
+    ["ruby"]="Gemfile"
+    ["php"]="composer.json"
+)
+
+# Check if this merge changed any dependency files
+check_dep_files_changed() {
+    local prev_head="$1"
+    local files_changed=0
+
+    # Check each category of dependency files
+    for files in "${DEP_FILES[@]}"; do
+        for file in $files; do
+            # Check if file changed in this merge
+            if git diff --name-only "$prev_head" HEAD 2>/dev/null | grep -q "^${file}$"; then
+                if [[ -f "$file" ]]; then
+                    echo "$file"
+                    files_changed=1
+                fi
+            fi
+        done
+    done
+
+    return $files_changed
+}
+
+# Main execution
+main() {
+    # Get previous HEAD before merge
+    prev_head="${1:-HEAD@{1}}"
+
+    # Check if any dependency files changed
+    changed_files=$(check_dep_files_changed "$prev_head" || true)
+
+    if [[ -z "$changed_files" ]]; then
+        # No dependency files changed - nothing to do
+        exit 0
+    fi
+
+    log_info "🔄 Dependency files changed in merge: $changed_files"
+
+    # Handle Node.js (package.json)
+    # Independent if statement to support polyglot repositories
+    if [[ "$changed_files" =~ package\.json ]]; then
+        # Detect which package manager to use
+        pkg_manager=$(detect_nodejs_package_manager)
+
+        case "$pkg_manager" in
+        bun)
+            log_info "Running bun install..."
+            if bun install >/dev/null 2>&1; then
+                log_success "Dependencies installed via bun"
+            else
+                log_warning "bun install failed - run manually: bun install"
+            fi
+            ;;
+        pnpm)
+            log_info "Running pnpm install..."
+            if pnpm install >/dev/null 2>&1; then
+                log_success "Dependencies installed via pnpm"
+            else
+                log_warning "pnpm install failed - run manually: pnpm install"
+            fi
+            ;;
+        yarn)
+            log_info "Running yarn install..."
+            if yarn install >/dev/null 2>&1; then
+                log_success "Dependencies installed via yarn"
+            else
+                log_warning "yarn install failed - run manually: yarn install"
+            fi
+            ;;
+        npm)
+            log_info "Running npm install..."
+            if npm install >/dev/null 2>&1; then
+                log_success "Dependencies installed via npm"
+            else
+                log_warning "npm install failed - run manually: npm install"
+            fi
+            ;;
+        *)
+            log_warning "No Node.js package manager found - install dependencies manually"
+            ;;
+        esac
+    fi
+
+    # Handle Python (requirements.txt)
+    # Independent if statement to support polyglot repositories
+    if [[ "$changed_files" =~ requirements\.txt ]]; then
+        if command_exists pip; then
+            log_info "Running pip install..."
+            if pip install -r requirements.txt >/dev/null 2>&1; then
+                log_success "Dependencies installed via pip"
+            else
+                log_warning "pip install failed - run manually: pip install -r requirements.txt"
+            fi
+        else
+            log_warning "pip not found - install dependencies manually"
+        fi
+    fi
+
+    # Handle Rust (Cargo.toml)
+    # Independent if statement to support polyglot repositories
+    if [[ "$changed_files" =~ Cargo\.toml ]]; then
+        if command_exists cargo; then
+            log_info "Running cargo fetch..."
+            if cargo fetch >/dev/null 2>&1; then
+                log_success "Dependencies fetched via cargo"
+            else
+                log_warning "cargo fetch failed - run manually: cargo fetch"
+            fi
+        else
+            log_warning "cargo not found - fetch dependencies manually"
+        fi
+    fi
+
+    # Handle Go (go.mod)
+    # Independent if statement to support polyglot repositories
+    if [[ "$changed_files" =~ go\.mod ]]; then
+        if command_exists go; then
+            log_info "Running go mod download..."
+            if go mod download >/dev/null 2>&1; then
+                log_success "Dependencies downloaded via go"
+            else
+                log_warning "go mod download failed - run manually: go mod download"
+            fi
+        else
+            log_warning "go not found - download dependencies manually"
+        fi
+    fi
+
+    # Handle Ruby (Gemfile)
+    # Independent if statement to support polyglot repositories
+    if [[ "$changed_files" =~ Gemfile ]]; then
+        if command_exists bundle; then
+            log_info "Running bundle install..."
+            if bundle install >/dev/null 2>&1; then
+                log_success "Dependencies installed via bundle"
+            else
+                log_warning "bundle install failed - run manually: bundle install"
+            fi
+        else
+            log_warning "bundle not found - install dependencies manually"
+        fi
+    fi
+
+    # Handle PHP (composer.json)
+    # Independent if statement to support polyglot repositories
+    if [[ "$changed_files" =~ composer\.json ]]; then
+        if command_exists composer; then
+            log_info "Running composer install..."
+            if composer install >/dev/null 2>&1; then
+                log_success "Dependencies installed via composer"
+            else
+                log_warning "composer install failed - run manually: composer install"
+            fi
+        else
+            log_warning "composer not found - install dependencies manually"
+        fi
+    fi
+
+    # Handle Python (Pipfile - pipenv)
+    # Independent if statement to support polyglot repositories
+    if [[ "$changed_files" =~ Pipfile ]]; then
+        if command_exists pipenv; then
+            log_info "Running pipenv install..."
+            if pipenv install >/dev/null 2>&1; then
+                log_success "Dependencies installed via pipenv"
+            else
+                log_warning "pipenv install failed - run manually: pipenv install"
+            fi
+        else
+            log_warning "pipenv not found - install dependencies manually"
+        fi
+    fi
+
+    # Handle Python (pyproject.toml - poetry)
+    # Independent if statement to support polyglot repositories
+    if [[ "$changed_files" =~ pyproject\.toml ]]; then
+        if command_exists poetry; then
+            log_info "Running poetry install..."
+            if poetry install >/dev/null 2>&1; then
+                log_success "Dependencies installed via poetry"
+            else
+                log_warning "poetry install failed - run manually: poetry install"
+            fi
+        else
+            log_warning "poetry not found - install dependencies manually"
+        fi
+    fi
+}
+
+main "$@"

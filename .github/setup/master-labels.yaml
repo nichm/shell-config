@@ -1,0 +1,247 @@
+# Master Label Configuration
+# Standardized labels across all repositories
+# Priority Levels: Critical, High, Medium, Low
+
+version: "1.0"
+name: "Standard Repository Labels"
+description: "Master label configuration for all repositories with 4-tier priority system"
+
+labels:
+  # === CRITICAL PRIORITY ===
+  # Security, blocking issues, production down
+  priority-critical:
+    name: "🔴 priority-critical"
+    color: "#b60205"
+    description: "Critical/breaking issues - fix immediately, blocking users"
+    priority: "critical"
+    category: "priority"
+
+  security-critical:
+    name: "🔒 security-critical"
+    color: "#b60205"
+    description: "Critical security vulnerabilities requiring immediate fix"
+    priority: "critical"
+    category: "security"
+
+  production-down:
+    name: "🚨 production-down"
+    color: "#b60205"
+    description: "Production system is down or severely degraded"
+    priority: "critical"
+    category: "infrastructure"
+
+  # === HIGH PRIORITY ===
+  # Important bugs, features, security fixes
+  priority-high:
+    name: "🟠 priority-high"
+    color: "#d93f0b"
+    description: "High priority issues - fix within 3 days"
+    priority: "high"
+    category: "priority"
+
+  bug:
+    name: "🐛 bug"
+    color: "#d73a4a"
+    description: "Something isn't working correctly"
+    priority: "high"
+    category: "bug"
+
+  security:
+    name: "🔒 security"
+    color: "#d73a49"
+    description: "Security related issues and improvements"
+    priority: "high"
+    category: "security"
+
+  feature:
+    name: "✨ feature"
+    color: "#22C55E"
+    description: "New feature or functionality"
+    priority: "high"
+    category: "feature"
+
+  blocked:
+    name: "🚫 blocked"
+    color: "#6c757d"
+    description: "Blocked by external factors or dependencies"
+    priority: "high"
+    category: "status"
+
+  # === MEDIUM PRIORITY ===
+  # Enhancements, improvements, maintenance
+  priority-medium:
+    name: "🟡 priority-medium"
+    color: "#fbca04"
+    description: "Medium priority issues - fix within 1 week"
+    priority: "medium"
+    category: "priority"
+
+  enhancement:
+    name: "🔧 enhancement"
+    color: "#a2eeef"
+    description: "Improvement to existing feature"
+    priority: "medium"
+    category: "enhancement"
+
+  performance:
+    name: "⚡ performance"
+    color: "#1d76db"
+    description: "Performance improvements and optimizations"
+    priority: "medium"
+    category: "performance"
+
+  documentation:
+    name: "📚 documentation"
+    color: "#0075ca"
+    description: "Documentation improvements or additions"
+    priority: "medium"
+    category: "documentation"
+
+  testing:
+    name: "🧪 testing"
+    color: "#5319e7"
+    description: "Test coverage and testing improvements"
+    priority: "medium"
+    category: "testing"
+
+  # === LOW PRIORITY ===
+  # Nice to have, cleanup, minor issues
+  priority-low:
+    name: "🟢 priority-low"
+    color: "#0e8a16"
+    description: "Low priority issues - fix when time permits"
+    priority: "low"
+    category: "priority"
+
+  good first issue:
+    name: "🌟 good first issue"
+    color: "#7057ff"
+    description: "Good for newcomers"
+    priority: "low"
+    category: "contribution"
+
+  help wanted:
+    name: "🙋 help wanted"
+    color: "#008672"
+    description: "Extra attention is needed"
+    priority: "low"
+    category: "contribution"
+
+  # === STATUS LABELS ===
+  # Work in progress, review states, completion
+  work-in-progress:
+    name: "🔄 work-in-progress"
+    color: "#fbca04"
+    description: "Currently being worked on"
+    priority: "status"
+    category: "status"
+
+  ready-for-review:
+    name: "👀 ready-for-review"
+    color: "#0e8a16"
+    description: "Ready for code review and merge"
+    priority: "status"
+    category: "status"
+
+  needs-discussion:
+    name: "💭 needs-discussion"
+    color: "#d876e3"
+    description: "Requires team discussion before implementation"
+    priority: "status"
+    category: "status"
+
+  # === AI/ASSISTANT LABELS ===
+  # Claude AI and other AI assistant workflows
+  claude-working:
+    name: "🤖 claude-working"
+    color: "#fbca04"
+    description: "Claude AI is currently analyzing this issue/PR"
+    priority: "status"
+    category: "ai"
+
+  claude-complete:
+    name: "✅ claude-complete"
+    color: "#0e8a16"
+    description: "Claude AI has successfully completed analysis"
+    priority: "status"
+    category: "ai"
+
+  claude-failed:
+    name: "❌ claude-failed"
+    color: "#d73a4a"
+    description: "Claude AI encountered an error during analysis"
+    priority: "status"
+    category: "ai"
+
+  # === DEPENDENCY LABELS ===
+  # Dependencies, GitHub Actions, tooling
+  dependencies:
+    name: "📦 dependencies"
+    color: "#0366d6"
+    description: "Pull requests that update dependencies"
+    priority: "medium"
+    category: "dependencies"
+
+  github-actions:
+    name: "⚙️ github-actions"
+    color: "#2188ff"
+    description: "Changes to GitHub Actions workflows"
+    priority: "medium"
+    category: "dependencies"
+
+  # === ADMIN LABELS ===
+  # Duplicates, invalid questions, wontfix
+  duplicate:
+    name: "🔄 duplicate"
+    color: "#cfd3d7"
+    description: "This issue or pull request already exists"
+    priority: "admin"
+    category: "admin"
+
+  question:
+    name: "❓ question"
+    color: "#d876e3"
+    description: "Further information is requested"
+    priority: "admin"
+    category: "admin"
+
+  invalid:
+    name: "❌ invalid"
+    color: "#e4e669"
+    description: "This doesn't seem right"
+    priority: "admin"
+    category: "admin"
+
+  wontfix:
+    name: "🚫 wontfix"
+    color: "#ffffff"
+    description: "This will not be worked on"
+    priority: "admin"
+    category: "admin"
+
+# === CONFIGURATION METADATA ===
+metadata:
+  created: "2025-01-15"
+  version: "1.0"
+  repositories: ["all"]
+  categories:
+    - priority
+    - security
+    - bug
+    - feature
+    - enhancement
+    - performance
+    - documentation
+    - testing
+    - contribution
+    - status
+    - ai
+    - dependencies
+    - admin
+  priority_levels:
+    critical: "Fix immediately - blocking users"
+    high: "Fix within 3 days"
+    medium: "Fix within 1 week"
+    low: "Fix when time permits"
+    status: "Workflow states"
+    admin: "Administrative/organizational"

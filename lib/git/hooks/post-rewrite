@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 📝 POST-REWRITE HOOK - Audit Trail for History Rewriting
+# =============================================================================
+# Runs after git commands that rewrite history:
+#   - git commit --amend
+#   - git rebase
+#   - git filter-branch
+# Logs rewrite operations for security auditing and compliance.
+# Helps track what happened, when, and by whom.
+# Logs to: ~/.git-rewrite-audit.log
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Source hook bootstrap (environment setup)
+# =============================================================================
+# Resolve symlinks so relative paths work from installed (~/.githooks/) location
+# shellcheck source=../shared/hook-bootstrap.sh
+_hook_real="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+source "$(dirname "$_hook_real")/../shared/hook-bootstrap.sh"
+unset _hook_real
+
+# =============================================================================
+# AUDIT LOG CONFIGURATION
+# =============================================================================
+
+AUDIT_LOG="${HOME}/.git-rewrite-audit.log"
+mkdir -p "$(dirname "$AUDIT_LOG")" 2>/dev/null || true
+
+# =============================================================================
+# LOGGING FUNCTIONS
+# =============================================================================
+
+# Log rewrite operation to audit file
+log_rewrite_audit() {
+    local rewrite_type="$1"
+    local old_sha="$2"
+    local new_sha="$3"
+    local count="$4"
+
+    # Get current timestamp
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    # Get repository information
+    local repo_url
+    repo_url=$(git remote get-url origin 2>/dev/null || echo 'local')
+
+    local repo_name
+    repo_name=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || echo 'unknown')")
+
+    local current_branch
+    current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo 'detached')
+
+    local current_user
+    current_user=$(git config user.name 2>/dev/null || echo 'unknown')
+    local current_email
+    current_email=$(git config user.email 2>/dev/null || echo 'unknown')
+
+    # Get commit message(s) for context
+    local commit_msgs
+    commit_msgs=$(git log --format='%s' "$old_sha..$new_sha" 2>/dev/null | head -5 || echo 'N/A')
+
+    # Log to audit file
+    {
+        echo "=========================================="
+        echo "Git History Rewrite Detected"
+        echo "=========================================="
+        echo "Date: $timestamp"
+        echo "Rewrite Type: $rewrite_type"
+        echo "Repository: $repo_name"
+        echo "Remote: $repo_url"
+        echo "Branch: $current_branch"
+        echo "User: $current_user <$current_email>"
+        echo "Commits Rewritten: $count"
+        echo "Old SHA: $old_sha"
+        echo "New SHA: $new_sha"
+        echo ""
+        echo "Commit Messages:"
+        echo "$commit_msgs"
+        echo ""
+        echo "=========================================="
+        echo ""
+    } >>"$AUDIT_LOG"
+}
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+main() {
+    # First argument is the rewrite type (amend, rebase, etc.)
+    local rewrite_type="$1"
+
+    if [[ -z "$rewrite_type" ]]; then
+        # Unknown rewrite type - exit silently
+        exit 0
+    fi
+
+    # Read rewritten commits from stdin
+    # Format: <old-sha> <new-sha> <extra-info>
+    local count=0
+    local first_old_sha=""
+    local first_new_sha=""
+
+    while IFS=' ' read -r old_sha new_sha _extra; do
+        if [[ -n "$old_sha" ]] && [[ -n "$new_sha" ]]; then
+            if [[ $count -eq 0 ]]; then
+                first_old_sha="$old_sha"
+                first_new_sha="$new_sha"
+            fi
+            ((count++))
+        fi
+    done
+
+    if [[ $count -eq 0 ]]; then
+        # No commits rewritten - nothing to log
+        exit 0
+    fi
+
+    # Log the rewrite operation
+    log_rewrite_audit "$rewrite_type" "$first_old_sha" "$first_new_sha" "$count"
+
+    # Display informational message
+    echo -e "${BLUE}📝 History rewrite logged to: $AUDIT_LOG${NC}" >&2
+    echo -e "${GREEN}✅ $rewrite_type operation completed: $count commit(s) rewritten${NC}" >&2
+
+    # Additional warnings for specific rewrite types
+    case "$rewrite_type" in
+    rebase)
+        echo -e "${BLUE}ℹ️  If you pushed this branch before, you'll need to force push:${NC}" >&2
+        echo -e "${BLUE}   git push --force-with-lease origin $(git symbolic-ref --short HEAD 2>/dev/null || echo HEAD)${NC}" >&2
+        ;;
+    amend)
+        echo -e "${BLUE}ℹ️  Commit amended. If pushed, force push required:${NC}" >&2
+        echo -e "${BLUE}   git push --force-with-lease${NC}" >&2
+        ;;
+    esac
+
+    exit 0
+}
+
+# Run main function
+main "$@"

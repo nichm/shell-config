@@ -1,0 +1,402 @@
+# Claude Code Assistant v5.18
+# Triggered by @claude mentions in issues, PRs, and reviews
+#
+# v5.18 - Fixed YAML syntax and validated both workflows
+# v5.17 - Added comprehensive system prompt with ALL MCP tools guide
+# v5.16 - Condensed system prompt by 20% while preserving key info
+
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubicloud-standard-2
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: write
+      statuses: write
+      checks: write
+      discussions: write
+    steps:
+      # Create/Update Claude labels with correct colors
+      # This must be first to ensure labels exist before any other steps use them
+      - name: Create Claude Labels if Missing
+        uses: actions/github-script@v8
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const labelsToCreate = [
+              { name: '🤖 claude-working', color: 'f97316', description: 'Claude AI is currently analyzing this issue/PR' },
+              { name: '✅ claude-complete', color: '22c55e', description: 'Claude AI has successfully completed analysis' },
+              { name: '❌ claude-failed', color: 'ef4444', description: 'Claude AI encountered an error during analysis' }
+            ];
+
+            for (const label of labelsToCreate) {
+              try {
+                const existingLabel = await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name
+                });
+
+                // Update color if it's incorrect
+                if (existingLabel.data.color !== label.color) {
+                  await github.rest.issues.updateLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description
+                  });
+                  console.log(`✅ Updated label color: ${label.name} → ${label.color}`);
+                } else {
+                  console.log(`Label already exists with correct color: ${label.name}`);
+                }
+              } catch (error) {
+                if (error.status === 404) {
+                  try {
+                    await github.rest.issues.createLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      name: label.name,
+                      color: label.color,
+                      description: label.description
+                    });
+                    console.log(`✅ Created label: ${label.name} (${label.color})`);
+                  } catch (createError) {
+                    console.log(`Could not create label ${label.name}:`, createError.message);
+                  }
+                } else {
+                  console.log(`Error checking label ${label.name}:`, error.message);
+                }
+              }
+            }
+
+      # Extract context for tracking
+      - name: Extract Context
+        id: context
+        run: |
+          # Determine issue/PR number for later jobs
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            echo "issue_number=${{ github.event.issue.number }}" >> \
+                "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "issues" ]; then
+            echo "issue_number=${{ github.event.issue.number }}" >> \
+                "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "pull_request_review_comment" ] || \
+             [ "${{ github.event_name }}" = "pull_request_review" ]; then
+            echo "issue_number=${{ github.event.pull_request.number }}" >> \
+                "$GITHUB_OUTPUT"
+          else
+            echo "issue_number=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.1
+
+      - name: Setup Bun cache
+        uses: actions/cache@v5.0.3
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2.1.0
+        with:
+          cache: true
+          cache-dependency-path: "**/bun.lockb"
+
+      - name: Cache MCP packages
+        uses: actions/cache@v5.0.3
+        with:
+          path: ~/.bun/global
+          key: ${{ runner.os }}-bun-global-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-global-
+
+      - name: Install MCP packages
+        run: |
+          bun install -g cerebras-code-mcp
+          bun install -g exa-mcp-server
+
+      # Install shell development tools for Claude to use
+      - name: Install Shell Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          # Install bats
+          git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+          # Verify installations
+          echo "shellcheck $(shellcheck --version | grep version:)"
+          echo "bats $(bats --version)"
+
+      # Add working badge when starting analysis
+      - name: Add Claude Working Badge
+        if: ${{ steps.context.outputs.issue_number != '' }}
+        uses: actions/github-script@v8
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = '${{ steps.context.outputs.issue_number }}';
+            if (!issueNumber) {
+              console.log('No issue number available for badge management');
+              return;
+            }
+
+            console.log(`Managing Claude labels for issue/PR #${issueNumber}`);
+
+            // Remove any existing Claude labels first
+            const claudeLabels = [
+              '🤖 claude-working',
+              '✅ claude-complete',
+              '❌ claude-failed',
+              '⚡ claude-analyzing'
+            ];
+
+            try {
+              const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+              });
+
+              // Remove existing Claude labels
+              for (const label of currentLabels) {
+                if (claudeLabels.includes(label.name)) {
+                  console.log(`Removing existing label: ${label.name}`);
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    name: label.name,
+                  });
+                }
+              }
+            } catch (error) {
+              console.log('Error removing existing labels:', error.message);
+            }
+
+            // Add working label (already created/verified in previous step)
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['🤖 claude-working'],
+            });
+
+            console.log('Added claude-working label');
+
+      - name: Run Claude Code
+        id: claude_action
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          show_full_output: true
+          track_progress: true
+          prompt: |
+            Repository: ${{ github.repository }}
+            Event: ${{ github.event_name }}
+
+            Please help with the task described in the issue/PR above.
+
+            **IMPORTANT**: Ensure you follow the request 100% by completing everything fully. If you strongly disagree with the approach, provide feedback after conducting thorough research.
+
+            **Requirements**:
+            - Use ALL available tools to achieve the best outcome
+            - State any failures with tools or MCPs and suggest workflow improvements
+            - Be self-iterating and act as a senior engineer
+            - Find the most impactful long-term solutions without overengineering
+          claude_args: |
+            --max-turns 100 \
+            --mcp-config '{
+              "mcpServers": {
+                "cerebras-code": {
+                  "command": "cerebras-mcp",
+                  "env": {
+                    "CEREBRAS_API_KEY": "${{ secrets.CEREBRAS_API_KEY }}",
+                    "CEREBRAS_MCP_IDE": "claude-code-action"
+                  }
+                },
+                "web-search-prime": {
+                  "type": "http",
+                  "url": "https://api.z.ai/api/mcp/web_search_prime/mcp",
+                  "headers": {
+                    "Authorization": "Bearer ${{ secrets.Z_AI_BEARER_TOKEN }}"
+                  }
+                },
+                "web-reader": {
+                  "type": "http",
+                  "url": "https://api.z.ai/api/mcp/web_reader/mcp",
+                  "headers": {
+                    "Authorization": "Bearer ${{ secrets.Z_AI_BEARER_TOKEN }}"
+                  }
+                },
+                "zread": {
+                  "type": "http",
+                  "url": "https://api.z.ai/api/mcp/zread/mcp",
+                  "headers": {
+                    "Authorization": "Bearer ${{ secrets.Z_AI_BEARER_TOKEN }}"
+                  }
+                },
+                "exa": {
+                  "command": "bun",
+                  "args": [
+                    "x",
+                    "exa-mcp-server",
+                    "tools=web_search_exa,get_code_context_exa,crawling_exa,company_research_exa,linkedin_search_exa"
+                  ],
+                  "env": {
+                    "EXA_API_KEY": "${{ secrets.EXA_API_KEY }}"
+                  }
+                }
+              }
+            }' \
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash,WebFetch,WebSearch,TodoWrite,Task,ExitPlanMode,Bash(shellcheck*),Bash(bats*),Bash(make*),Bash(bun*),Bash(oxlint*),Bash(gh*),Bash(git*),Bash(node*),Bash(wc*),Bash(find*),Bash(chmod*),Bash(cat*),Bash(grep*),Bash(awk*),Bash(sed*),Bash(sort*),Bash(head*),Bash(tail*),Bash(diff*),Bash(bash*),Bash(source*),mcp__cerebras-code__*,mcp__web-search-prime__*,mcp__web-reader__*,mcp__zread__*,mcp__exa__*,mcp__github_comment__*" \
+            --system-prompt |
+              You are a Senior Shell/Bash Engineer and Product Manager for a comprehensive shell configuration system (shell-config). You excel at bash scripting, security, and developer tooling.
+
+              ## Shell-Config Context:
+              - **Scope**: ~10,000 lines bash/zsh, 117 source files, 28 test files
+              - **Platform**: macOS (Apple Silicon) primary, Linux secondary, never Windows
+              - **Bash**: 5.x required (Homebrew on macOS). Modern features allowed: declare -A, readarray, ${var,,}
+              - **Tools**: shellcheck, bats (testing), actionlint
+              - **Max file size**: 600 lines target, 800 hard limit
+              - **Error format**: WHAT failed / WHY it matters / HOW to fix
+              - **Security**: Never pipe curl to sh, quote all variables, trap handlers for temp files
+
+              ## Shell Development Standards:
+              1. Run `shellcheck --severity=warning` on every change
+              2. Run `./tests/run_all.sh` before commit
+              3. Source shared colors library (lib/core/colors.sh) - never define inline colors
+              4. Use `set -euo pipefail` in critical scripts
+              5. All commands must be non-interactive (no prompts, fail loudly)
+              6. Use command cache (`command_exists`) instead of repeated `command -v`
+              7. Use centralized platform detection (`is_macos`, `is_linux`)
+
+              ## High-Risk Files:
+              - lib/bin/rm (CRITICAL - protected path deletion)
+              - lib/git/wrapper.sh (HIGH - security bypass flags)
+              - lib/command-safety/engine/*.sh (HIGH - core matching)
+              - install.sh (HIGH - symlinks, idempotent)
+
+              ## MCP Tools:
+              - **Cerebras Code**: Ultra-fast inference for rapid prototyping
+              - **Web Search Prime/Reader/Zread**: Real-time web research
+              - **Exa**: Advanced web search, code context, crawling
+              - **GitHub Comment**: Issue/PR communication
+
+              ## Working Style:
+              - Follow CLAUDE.md project guidelines (takes precedence)
+              - Be self-iterating, act as a senior engineer
+              - Find impactful long-term solutions without overengineering
+              - Use ALL available tools and MCP servers
+              - State any failures with tools or MCPs
+          settings: |
+            {
+              "env": {
+                "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+                "API_TIMEOUT_MS": "3000000"
+              }
+            }
+
+      # Update badge to show completion status with enhanced error handling
+      - name: Update Claude Completion Badge
+        if: ${{ always() && steps.context.outputs.issue_number != '' }}
+        uses: actions/github-script@v8
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = '${{ steps.context.outputs.issue_number }}';
+            if (!issueNumber) {
+              console.log('Could not determine issue/PR number for completion badge');
+              return;
+            }
+
+            // Determine completion status
+            const claudeActionStatus = '${{ steps.claude_action.conclusion }}';
+
+            console.log(`Updating completion badge for issue/PR #${issueNumber}`);
+            console.log(`Claude action status: ${claudeActionStatus}`);
+
+            // Remove working label first
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                name: '🤖 claude-working',
+              });
+              console.log('Removed claude-working label');
+            } catch (error) {
+              console.log('Working label not found or already removed');
+            }
+
+            // Determine which completion label to add and create informative comment
+            let completionLabel, labelColor, labelDescription, commentMessage;
+
+            if (claudeActionStatus === 'success') {
+              completionLabel = '✅ claude-complete';
+              labelColor = '22c55e';
+              labelDescription = 'Claude AI has successfully completed analysis';
+              commentMessage = null; // No comment needed for successful completion
+            } else if (claudeActionStatus === 'skipped') {
+              // Don't add any completion label if Claude was skipped
+              console.log('Claude action was skipped, not adding completion label');
+              return;
+            } else {
+              completionLabel = '❌ claude-failed';
+              labelColor = 'ef4444';
+              labelDescription = 'Claude AI encountered an error during analysis';
+              commentMessage = "### ❌ Claude Error\n\nClaude encountered an error during analysis:\n\n**Error Status**: " + claudeActionStatus + "\n\nPlease check the workflow logs for more details or try again later.\n\n---\n*This is an automated error notification.*";
+              console.log('Claude error detected');
+            }
+
+            // Add completion label (already created/verified in previous step)
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: [completionLabel],
+            });
+
+            console.log(`Added ${completionLabel} label`);
+
+            // Add informative comment for errors
+            if (commentMessage) {
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: commentMessage,
+                });
+                console.log('Added informative error comment');
+              } catch (commentError) {
+                console.log('Error adding comment:', commentError.message);
+              }
+            }

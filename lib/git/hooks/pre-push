@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 🔒 PRE-PUSH HOOK - Last Line of Defense Before Remote Push
+# =============================================================================
+# Runs before git push to ensure code quality:
+#   1. Run tests on changed files (warning only)
+# NOTE: Secrets scanning removed - already done in pre-commit.
+# NOTE: Workflow validation removed - already done in pre-commit.
+# Bypass: git push --no-verify
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Source hook bootstrap (environment setup)
+# =============================================================================
+# Resolve symlinks so relative paths work from installed (~/.githooks/) location
+# shellcheck source=../shared/hook-bootstrap.sh
+_hook_real="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+source "$(dirname "$_hook_real")/../shared/hook-bootstrap.sh"
+unset _hook_real
+
+# =============================================================================
+# Source shared utilities
+# =============================================================================
+# shellcheck source=../shared/file-scanner.sh
+source "${SHARED_DIR}/file-scanner.sh"
+# shellcheck source=../shared/reporters.sh
+source "${SHARED_DIR}/reporters.sh"
+
+# Get the remote name from git push arguments
+remote="${1:-origin}"
+
+report_hook_start "pre-push" "Running pre-push checks for $remote"
+
+# =============================================================================
+# Get changed files in push range
+# =============================================================================
+# Get local and remote branch names
+# Handle detached HEAD gracefully (e.g., tag-only pushes)
+local_branch=$(git symbolic-ref -q HEAD 2>/dev/null | sed 's|refs/heads/||' || echo "detached")
+remote_branch=$(git rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null || echo "origin/$local_branch")
+
+# Get the commit range for what's being pushed
+if git rev-parse "$remote_branch" >/dev/null 2>&1; then
+    commit_range="$remote_branch..HEAD"
+else
+    # Remote branch doesn't exist yet (first push)
+    commit_range="HEAD"
+fi
+
+# Get changed files in this push
+OLDIFS="$IFS"
+IFS=$'\n'
+changed_files=()
+while IFS= read -r file; do
+    [[ -n "$file" ]] && changed_files+=("$file")
+done < <(get_range_files "$commit_range")
+IFS="$OLDIFS"
+
+if [[ ${#changed_files[@]} -eq 0 ]]; then
+    report_hook_success "pre-push"
+    exit 0
+fi
+
+report_info "Checking ${#changed_files[@]} changed file(s) in push range..."
+
+# =============================================================================
+# 1. Run tests on changed files (warning only - does not block push)
+# =============================================================================
+if [[ -f "package.json" ]]; then
+    # Check if test script exists
+    if grep -q '"test":' package.json 2>/dev/null; then
+        report_info "Running tests on changed files..."
+        if command_exists "bun"; then
+            if ! _portable_timeout "${SC_HOOK_TIMEOUT_LONG:-60}" bun run test --silent >/dev/null 2>&1; then
+                log_warning "Tests failed - consider fixing before pushing"
+            else
+                report_validation_success "Tests passed"
+            fi
+        else
+            log_warning "Bun not found - skipping tests"
+        fi
+    fi
+fi
+
+# =============================================================================
+# All checks passed
+# =============================================================================
+report_hook_success "pre-push"
+exit 0

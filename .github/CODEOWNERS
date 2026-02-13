@@ -1,0 +1,3 @@
+# Code owners for shell-config
+# @nichm owns all code and will be automatically requested for review
+*       @nichm

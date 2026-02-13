@@ -1,0 +1,88 @@
+# Option H: Data table format - infrastructure.sh
+
+RULE docker_rm_f docker warn critical 🔴
+PAT rm -f|rm --force
+DESC Force removing Docker containers loses ALL container state
+BYP --force-docker-rm
+ALT docker stop <container> && docker rm <container>  # Graceful shutdown
+ALT docker commit <container> <image>                  # Save state first
+CHK Run: docker ps -a to list all containers
+CHK Check if container has important data or changes
+CHK Consider: docker commit to save state first
+CHK Check if container is part of docker-compose setup
+CHK Verify container name/ID is correct
+AI ⚠️ AI AGENT: CRITICAL - Force removing Docker containers loses ALL container state.
+AI REQUIRED checks:
+AI 1) Run 'docker ps -a' to list all containers
+AI 2) Check if container has important data or changes
+AI 3) Consider 'docker commit' to save state first
+AI 4) Check if container is part of docker-compose setup
+AI 5) Verify container name/ID is correct
+AI 6) Only proceed with --force-docker-rm after ALL checks pass
+END
+
+RULE kubectl_delete kubectl warn critical 🔴
+PAT delete
+DESC Deleting Kubernetes resources is often irreversible
+BYP --force-k8s-delete
+ALT kubectl scale deployment <name> --replicas=0  # Scale down instead
+ALT kubectl cordon <node>                          # Drain nodes safely
+CHK Run: kubectl get all to see current resources
+CHK Check if resource is in production namespace
+CHK Run: kubectl describe <resource> <name> to see dependencies
+CHK Consider: kubectl get -o yaml to backup config
+CHK Verify resource name is correct
+CHK Check for dependent resources that will be deleted
+AI ⚠️ AI AGENT: CRITICAL - Deleting Kubernetes resources is often irreversible.
+AI REQUIRED checks:
+AI 1) Run 'kubectl get all' to see current resources
+AI 2) Check if resource is in production namespace
+AI 3) Run 'kubectl describe <resource> <name>' to see dependencies
+AI 4) Consider 'kubectl get -o yaml' to backup config
+AI 5) Verify resource name is correct
+AI 6) Check for dependent resources that will be deleted
+AI 7) Only proceed with --force-k8s-delete after ALL checks pass
+END
+
+RULE terraform_destroy terraform block critical 🔴
+PAT destroy
+DESC Terraform destroy will DELETE ALL infrastructure in state
+BYP --force-destroy
+ALT terraform apply -replace=<resource>  # Replace specific resources
+ALT terraform state rm                    # Remove from state without deletion
+CHK Run: terraform state list to see ALL resources
+CHK Run: terraform plan -destroy to see what will be deleted
+CHK Verify you're in correct environment/workspace
+CHK Check if state backend is correct
+CHK Consider: terraform state rm to remove specific resources
+AI ⚠️ AI AGENT: BLOCKED - Terraform destroy will DELETE ALL infrastructure in state.
+AI This is TOO DANGEROUS for automation - require manual human execution.
+AI Tell user to run these steps manually:
+AI 1) Run 'terraform state list' to see ALL resources
+AI 2) Run 'terraform plan -destroy' to see what will be deleted
+AI 3) Verify you're in correct environment/workspace
+AI 4) Check if state backend is correct
+AI 5) Consider 'terraform state rm' to remove specific resources instead
+AI 6) Get EXPLICIT confirmation from user
+AI 7) Only proceed manually after ALL checks pass AND user explicitly confirms
+END
+
+RULE ansible_playbook_dangerous ansible-playbook warn high 🔴
+PAT --tags.*dangerous|dangerous.*tags
+DESC Ansible playbooks can make destructive changes across multiple servers
+BYP --force-ansible
+ALT ansible-playbook --check  # Dry-run mode
+ALT ansible-playbook --limit <single-host>  # Test on one host first
+CHK Run: ansible-playbook --list-tags <playbook> to see tags
+CHK Run: ansible-playbook --list-tasks <playbook> to see all tasks
+AI ⚠️ AI AGENT: CRITICAL - Ansible playbooks can make destructive changes across multiple servers.
+AI REQUIRED checks:
+AI 1) Run 'ansible-playbook --list-tags <playbook>' to see tags
+AI 2) Run 'ansible-playbook --list-tasks <playbook>' to see all tasks
+AI 3) Run with '--check' (dry-run) flag first
+AI 4) Verify inventory target is correct
+AI 5) Check if playbook uses 'dangerous' tags
+AI 6) Run on single host first for testing
+AI 7) Only proceed with --force-ansible after ALL checks pass
+END
+

@@ -1,0 +1,65 @@
+# Shell-Config Qodo Review Instructions
+
+## Context
+Shell configuration framework (~10k lines bash/zsh) for macOS/Linux.
+
+## Platform
+- macOS (bash 5.x via Homebrew, zsh 5.9) PRIMARY
+- Linux (bash 5.x) SECONDARY
+- Windows NEVER
+
+## Bash Version Requirement
+Minimum: Bash 4.0+ | Recommended: Bash 5.x
+macOS users must run: `brew install bash`
+
+## Modern Bash Features (Now Allowed)
+- `declare -A` (associative arrays) ✅
+- `${var,,}` / `${var^^}` (case conversion) ✅
+- `|&` (stderr pipe) ✅
+- `readarray` / `mapfile` ✅
+
+See docs/decisions/BASH-5-UPGRADE.md for rationale.
+
+## BLOCK If Found
+
+### Interactive Commands
+- `read -p` prompts
+- Any command waiting for user input
+- Silent failures without error messages
+
+### Missing Error Format
+Errors MUST include WHAT/WHY/HOW with actionable fixes:
+```bash
+echo "ERROR: gitleaks not installed" >&2
+echo "WHY: Required for secrets scanning in pre-commit hooks" >&2
+echo "FIX: brew install gitleaks" >&2
+exit 1
+```
+
+### Security Issues
+- Unquoted variables: `$var` instead of `"$var"`
+- Missing trap handlers for temp files
+- ShellCheck violations
+
+### File Size
+- Files >600 lines MUST be split
+
+### Missing Tests
+- New functions without tests
+- Bug fixes without regression tests
+
+## High-Risk Files
+| File | Risk |
+|------|------|
+| `lib/bin/rm` | CRITICAL |
+| `lib/git/core.sh` | HIGH |
+| `lib/validation/api.sh` | HIGH (721 lines) |
+
+## Don't Review
+- Formatting (not enforced)
+- hooks.disabled/ directory
+
+## Good Comments
+- "Error message missing WHY/HOW to fix"
+- "Missing trap handler for temp file line N"
+- "File is N lines - needs split"

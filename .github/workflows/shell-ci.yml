@@ -1,0 +1,109 @@
+# =============================================================================
+# Shell CI - Lint and Test for shell-config
+# =============================================================================
+# Runs shellcheck, bats, and actionlint on push/PR to ensure quality.
+# Uses ubicloud runners for cost efficiency.
+#
+# v1.1.0 - Removed shfmt (formatting not enforced)
+# v1.0.0 - Initial shell CI with shellcheck, bats, actionlint
+
+name: Shell CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    paths:
+      - "**/*.sh"
+      - "**/*.bash"
+      - "**/*.bats"
+      - ".github/workflows/**"
+      - "lib/**"
+      - "tests/**"
+      - "config/**"
+      - "install.sh"
+      - "uninstall.sh"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+  statuses: write
+
+jobs:
+  shellcheck:
+    name: 🐚 ShellCheck
+    runs-on: ubicloud-standard-2
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck --version
+
+      - name: Lint lib/ scripts
+        run: |
+          find lib -name "*.sh" -type f \
+            -exec shellcheck --severity=warning --shell=bash \
+            -e SC1090 -e SC1091 -e SC2034 -e SC2155 {} +
+
+      - name: Lint top-level scripts
+        run: |
+          for f in install.sh uninstall.sh; do
+            if [[ -f "$f" ]]; then
+              shellcheck --severity=warning --shell=bash \
+                -e SC1090 -e SC1091 -e SC2034 -e SC2155 "$f"
+            fi
+          done
+
+      - name: Lint bin/ scripts
+        run: |
+          if [[ -d lib/bin ]]; then
+            find lib/bin -type f -exec shellcheck --severity=warning --shell=bash \
+              -e SC1090 -e SC1091 -e SC2034 -e SC2155 {} +
+          fi
+
+  bats:
+    name: 🧪 BATS Tests
+    runs-on: ubicloud-standard-2
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bash 5.x
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bash
+          bash --version
+
+      - name: Install BATS and helpers
+        run: |
+          git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+          bats --version
+
+      - name: Run tests
+        run: |
+          export SHELL_CONFIG_DIR="$PWD"
+          chmod +x tests/run_all.sh
+          ./tests/run_all.sh
+        env:
+          TERM: xterm-256color
+          TEST_TIMEOUT: 180
+
+  actionlint:
+    name: 🎬 Action Lint
+    runs-on: ubicloud-standard-2
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: raven-actions/actionlint@v2

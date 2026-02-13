@@ -1,0 +1,144 @@
+# Shell-Config - Claude AI PR Review Instructions
+
+## Repository Context
+
+**shell-config** - A comprehensive shell configuration system (~10,000 lines bash/zsh, 117 source files, 28 test files) with aliases, security tools, git wrappers, and productivity enhancements for macOS and Linux.
+
+### Tech Stack & Standards
+
+- **Platform**: macOS (Apple Silicon) primary, Linux secondary, never Windows
+- **Shell**: Bash 5.x required (Homebrew on macOS), Zsh 5.9 default interactive
+- **Tools**: shellcheck, bats (testing), actionlint
+- **File Limits**: 600 lines target, 800 hard limit
+- **Error Format**: WHAT failed / WHY it matters / HOW to fix
+
+## Your Primary Task: Comprehensive PR Review
+
+Perform a thorough PR review focusing on shell/bash code quality, security, maintainability, and adherence to project standards. Use the checklist below, marking items with [x] if satisfied, [ ] if not, or [~] if partially satisfied.
+
+**IMPORTANT**: Complete the review fully. If you disagree with an approach, provide constructive feedback after thorough research using available tools.
+
+**Requirements**:
+- Run `shellcheck --severity=warning` on changed .sh files
+- Run `./tests/run_all.sh` if test files are affected
+- Use ALL available tools, MCPs, and capabilities for thorough review
+- Focus on impactful improvements without overengineering
+
+## 💡 Review Mindset
+
+**Focus on high-impact improvements**
+- Identify changes that significantly improve codebase with minimal effort
+- Prioritize security and correctness over style nitpicks
+- Avoid overengineering - keep solutions simple and practical
+
+**Think long-term maintainability**
+- Will future developers understand this code easily?
+- Are patterns consistent with existing codebase?
+- Is the code flexible enough for future requirements?
+
+## 📋 Review Checklist
+
+### 🔍 GitHub Issues & Scope
+- [ ] PR references GitHub issues (look for "fixes #", "closes #", "resolves #")
+- [ ] If related issue exists, requirements are fully addressed
+- [ ] No missing requirements or incomplete implementations
+- [ ] Scope matches the issue description and goals
+
+### 🚨 Critical Issues (Shell-Specific)
+- [ ] No command injection vulnerabilities (all variables quoted)
+- [ ] Proper error handling: `set -euo pipefail` in critical scripts
+- [ ] Error messages follow WHAT/WHY/FIX format
+- [ ] No exposed secrets, API keys, or sensitive data
+- [ ] No `curl | sh` piping without verification
+- [ ] Temp files use trap handlers for cleanup
+- [ ] No interactive prompts (all commands non-interactive)
+- [ ] Platform detection uses centralized `is_macos`/`is_linux` functions
+
+### 🐚 ShellCheck & Formatting
+- [ ] shellcheck passes with `--severity=warning`
+- [ ] No shellcheck suppressions without justification
+- [ ] Proper quoting throughout (`"$var"` not `$var`)
+
+### ✅ Code Completeness
+- [ ] No TODO comments or placeholder code
+- [ ] No backup files (.bak) or commented-out code blocks
+- [ ] All implementations fully functional
+- [ ] File size within limits (600 target, 800 max)
+- [ ] Proper error handling throughout (WHAT/WHY/FIX)
+
+### 🧪 Testing
+- [ ] New functions have corresponding bats tests
+- [ ] Bug fixes have regression tests
+- [ ] Tests pass: `./tests/run_all.sh`
+- [ ] Edge cases covered (empty input, missing files, spaces in paths)
+
+### 📊 Code Quality
+- [ ] Uses shared colors library (lib/core/colors.sh) - no inline color definitions
+- [ ] Uses command cache (`command_exists`) for dependency checks
+- [ ] Uses centralized platform detection
+- [ ] Uses centralized protected paths for security checks
+- [ ] Follows DRY principles - common patterns extracted
+- [ ] Consistent with existing patterns and architectural decisions
+- [ ] Bash 5.x features used appropriately (associative arrays, readarray, etc.)
+
+### 🔧 Functionality
+- [ ] Code changes work as described in PR
+- [ ] No unexpected side effects or behavior
+- [ ] High-risk files reviewed with extra scrutiny:
+  - lib/bin/rm (CRITICAL - protected path deletion)
+  - lib/git/wrapper.sh (HIGH - security bypass flags)
+  - lib/command-safety/engine/*.sh (HIGH - core matching)
+  - install.sh (HIGH - symlinks, idempotent)
+
+### 📚 Documentation
+- [ ] Script header blocks present (purpose, usage, dependencies)
+- [ ] Complex logic has inline comments
+- [ ] CLAUDE.md updated if new patterns/conventions introduced
+
+## 🛠️ Available Shell Tools
+
+- **shellcheck**: Static analysis for shell scripts
+- **bats**: Bash Automated Testing System
+- **actionlint**: GitHub Actions workflow linter
+
+## 📝 Instructions
+
+- Use `gh pr comment` for top-level summary with checklist results
+- Use inline comments for specific code issues
+- Run shellcheck on changed files and report findings
+- Be constructive and actionable in feedback
+- Highlight both strengths and areas for improvement
+
+## 📌 Issue Creation for Non-Blocking Concerns
+
+If you identify important issues that don't block merging but should be addressed:
+- First, search existing issues using `gh issue list` to avoid duplicates
+- If no existing issue covers it, create a new GitHub issue using `gh issue create`
+- Include clear description and suggested solution
+- Label appropriately (e.g., "technical-debt", "enhancement", "refactoring")
+- Reference the PR number in the issue description
+
+## 🎯 Shell-Config Focus Areas
+
+### Security (lib/bin/rm, lib/command-safety/, lib/git/)
+- Protected path validation (symlink resolution, bypass prevention)
+- Command safety rules and matching engine
+- Git hook security (secrets scanning, large file checks)
+
+### Core Infrastructure (lib/core/)
+- Colors library, command cache, platform detection
+- Config loading, logging, protected paths
+
+### Integrations (lib/integrations/)
+- 1Password secrets loading
+- SSH key sync
+- Tool integrations (eza, fzf, ripgrep)
+
+### Tests (tests/)
+- BATS test files
+- Compliance tests, validation tests
+- Git hook tests
+
+---
+
+**Follow project-specific guidelines in CLAUDE.md - they take precedence over these instructions.**

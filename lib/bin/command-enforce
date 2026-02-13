@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# =============================================================================
+# command-enforce — Universal PATH-based command safety enforcement
+# =============================================================================
+# Single busybox-style script that enforces command safety for ALL protected
+# commands in non-interactive shells (AI agents, scripts, subshells).
+#
+# Architecture (defense in depth):
+#   Layer 1: PATH wrapper (this file) — works in ALL shells
+#   Layer 2: Function wrapper (command-safety engine) — interactive shells only
+#   Layer 3: chflags protection — kernel-level (rm only)
+#   Zero rule duplication — this script sources the EXISTING command-safety
+#   engine, reusing all rules, messages, alternatives, and display logic.
+#
+# How it works:
+#   Symlinks (python3 → command-enforce, docker → command-enforce, etc.)
+#   cause this script to be found first in PATH. It detects the invoked
+#   command via $(basename "$0"), loads the engine, and checks rules.
+#   Blocked commands show the same messages as the interactive wrappers.
+#   Allowed commands pass through to the real binary with zero side effects.
+#
+# Fast passthrough (no engine load):
+#   --help / --version / -h / -V
+#   PATH_ENFORCE_DISABLE=1
+#
+# Bypass per-command: use the rule's bypass flag (e.g., --force-python3)
+# Bypass global:      PATH_ENFORCE_DISABLE=1 <command> <args>
+#
+# Adding a new enforced command:
+#   1. Add rule in lib/command-safety/rules/<service>.sh (engine handles it)
+#   2. Add command to COMMAND_SAFETY_PROTECTED_COMMANDS in rules/settings.sh
+#   3. Add symlink: ln -sf command-enforce lib/bin/<command>
+#   4. Add to ENFORCE_COMMANDS array in install.sh
+#
+# Protected commands (symlinks):
+#   Package managers: npm npx yarn pnpm composer pip pip3 python python3
+#                     go cargo brew bun
+#   Dangerous ops:    chmod sudo dd mkfs sed find truncate
+#   Git tools:        gh mv
+#   Containers:       docker kubectl
+#   Infrastructure:   terraform ansible-playbook
+#   Tech-stack:       supabase next pg_dump
+#   Web tools:        nginx prettier wrangler
+#
+# NOT wrapped here (have their own specialized wrappers):
+#   rm  — lib/bin/rm (PATH wrapper with protected-paths + audit)
+#   git — lib/git/wrapper.sh (function wrapper with specialized git logic)
+# =============================================================================
+set -euo pipefail
+
+CMD="$(basename "$0")"
+WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SHELL_CONFIG_DIR="$(cd "$WRAPPER_DIR/../.." && pwd)"
+
+# --- Find real binary (skip our wrapper directory in PATH) ---
+# Uses while read to safely iterate PATH (prevents glob expansion of dirs)
+_find_real() {
+    local dir
+    while IFS= read -r -d: dir; do
+        [[ -z "$dir" ]] && continue
+        [[ "$dir" == "$WRAPPER_DIR" ]] && continue
+        [[ -x "$dir/$CMD" ]] && echo "$dir/$CMD" && return 0
+    done <<< "$PATH:"
+    return 1
+}
+
+REAL_BIN=$(_find_real) || REAL_BIN=""
+
+# --- Fast passthrough (no engine load needed) ---
+if [[ -n "$REAL_BIN" ]]; then
+    case "${1-}" in
+        --help | -h | --version | -V) exec "$REAL_BIN" "$@" ;;
+    esac
+    [[ "${PATH_ENFORCE_DISABLE:-0}" == "1" ]] && exec "$REAL_BIN" "$@"
+else
+    [[ "${PATH_ENFORCE_DISABLE:-0}" == "1" ]] && {
+        echo "❌ ERROR: '$CMD' is not installed" >&2
+        echo "ℹ️  WHY: No real '$CMD' binary found in PATH (only the safety wrapper)" >&2
+        echo "💡 FIX: Install '$CMD' or use the suggested alternative" >&2
+        exit 127
+    }
+fi
+
+# --- Load the command-safety engine (reuses ALL existing rules + display) ---
+# Sources: registry → rules (settings + all rule files) → utils → logging →
+#          display → matcher. Skips wrapper.sh (creates function wrappers —
+#          not needed here since we ARE the wrapper).
+_load_engine() {
+    local engine_dir="$SHELL_CONFIG_DIR/lib/command-safety"
+    export _COMMAND_SAFETY_DIR="$engine_dir"
+    source "$engine_dir/engine/loader.sh" || return 1
+    source "$engine_dir/engine/utils.sh" || return 1
+    source "$engine_dir/engine/logging.sh" || return 1
+    source "$engine_dir/engine/display.sh" || return 1
+    source "$engine_dir/engine/matcher.sh" || return 1
+}
+
+if ! _load_engine; then
+    # Engine failed to load — don't break commands, fall through
+    [[ -n "$REAL_BIN" ]] && exec "$REAL_BIN" "$@"
+    echo "❌ ERROR: Command safety engine failed to load" >&2
+    echo "ℹ️  WHY: Could not source engine from $SHELL_CONFIG_DIR/lib/command-safety/" >&2
+    echo "💡 FIX: Run 'shell-config doctor' or reinstall shell-config" >&2
+    exit 1
+fi
+
+# --- Strip only known bypass flags for this command (from rule registry) ---
+# Populates _clean_args array with args minus any rule-defined bypass flags.
+# This avoids stripping legitimate --force-* flags (e.g., docker build --force-rm).
+_strip_bypass_flags() {
+    local cmd="$1"
+    shift
+
+    # Collect known bypass flags for this command from the rule registry.
+    # Temporarily disable nounset — bash set -u is incompatible with
+    # associative array key lookup when the key may not exist.
+    # shellcheck disable=SC2154
+    local -A _bp_set=()
+    local _suffix _bypass
+    set +u
+    for _suffix in "${COMMAND_SAFETY_RULE_SUFFIXES[@]}"; do
+        if [[ "${COMMAND_SAFETY_RULE_COMMAND[$_suffix]:-}" == "$cmd" ]]; then
+            _bypass="${COMMAND_SAFETY_RULE_BYPASS[$_suffix]:-}"
+            [[ -n "$_bypass" ]] && _bp_set["$_bypass"]=1
+        fi
+    done
+    set -u
+
+    # Build clean args, stripping only known bypass flags
+    _clean_args=()
+    local _arg _hit
+    for _arg in "$@"; do
+        set +u; _hit="${_bp_set[$_arg]:-}"; set -u
+        if [[ -z "$_hit" ]]; then
+            _clean_args+=("$_arg")
+        fi
+    done
+}
+
+# --- Check rules (engine handles display, logging, matching) ---
+_cs_rc=0
+_check_command_rules "$CMD" "$@" || _cs_rc=$?
+
+case $_cs_rc in
+    1)
+        # Blocked — engine already showed the message via display.sh
+        exit 1
+        ;;
+    0 | 2)
+        # Allowed (0) or no rules for this command (2) — pass through
+        # Only strip bypass flags defined in rules for this command.
+        # Do NOT strip all --force-* flags — real commands use them
+        # (e.g., docker build --force-rm).
+        _strip_bypass_flags "$CMD" "$@"
+        if [[ -n "$REAL_BIN" ]]; then
+            exec "$REAL_BIN" "${_clean_args[@]}"
+        else
+            echo "❌ ERROR: '$CMD' is not installed" >&2
+            echo "ℹ️  WHY: No real '$CMD' binary found in PATH" >&2
+            echo "💡 FIX: Install '$CMD' (e.g., 'brew install $CMD')" >&2
+            exit 127
+        fi
+        ;;
+esac

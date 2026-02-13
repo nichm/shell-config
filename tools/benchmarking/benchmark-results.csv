@@ -1,0 +1,19 @@
+Function,Time_ms,Rating,Category
+zsh (no config),2.85,GREAT,startup
+zsh -i (full startup),130.11,MID,startup
+source init.sh only,92.85,MID,startup
+welcome_message (full),2.82,GREAT,welcome
+node version detection,16.42,GREAT,welcome
+python version detection,20.37,GREAT,welcome
+minimal_init (all disabled),53.44,MID,startup
+without WELCOME,93.60,MID,startup/flags
+without COMMAND_SAFETY,84.29,MID,startup/flags
+without GIT_WRAPPER,93.20,MID,startup/flags
+without GHLS,96.59,MID,startup/flags
+without EZA,95.36,MID,startup/flags
+without RIPGREP,95.83,MID,startup/flags
+without SECURITY,93.04,MID,startup/flags
+without 1PASSWORD,93.46,MID,startup/flags
+without LOG_ROTATION,72.63,MID,startup/flags
+compinit (cold),21.15,GREAT,startup/compinit
+compinit (warm, cached zcompdump),12.91,GREAT,startup/compinit

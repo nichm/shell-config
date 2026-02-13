@@ -1,0 +1,66 @@
+# =============================================================================
+# 📝 SHELL-CONFIG CONFIGURATION EXAMPLE
+# =============================================================================
+# Copy this file to: ~/.config/shell-config/config
+# Or run: shell-config init
+# =============================================================================
+
+# =============================================================================
+# 🎛️ FEATURE FLAGS
+# =============================================================================
+
+# Welcome message on new terminal (default: true)
+WELCOME_ENABLED=true
+
+# Command safety - dangerous command protection (default: true)
+COMMAND_SAFETY_ENABLED=true
+
+# Git wrapper - safety checks for git commands (default: true)
+GIT_WRAPPER_ENABLED=true
+
+# GHLS - GitHub-style statusline (default: true)
+GHLS_ENABLED=true
+
+# Eza - Modern ls replacement (default: true)
+EZA_ENABLED=true
+
+# FZF - Fuzzy finder integration (default: true)
+FZF_ENABLED=true
+
+# Ripgrep - Code search aliases (default: true)
+RIPGREP_ENABLED=true
+
+# Security hardening - umask and safe wrappers (default: true)
+SECURITY_ENABLED=true
+
+# 1Password integration - secrets from vault (default: true)
+1PASSWORD_ENABLED=true
+
+# Terminal autocomplete - disabled by default (Ghostty compatibility)
+AUTOCOMPLETE_ENABLED=false
+
+# Log rotation on shell startup (default: true)
+LOG_ROTATION=true
+
+# =============================================================================
+# ⏱️ CACHE SETTINGS (in seconds)
+# =============================================================================
+
+# Git secrets scan cache (default: 300 = 5 minutes)
+SECRETS_CACHE_TTL=300
+
+# Welcome message cache (default: 60 = 1 minute)
+WELCOME_CACHE_TTL=60
+
+# =============================================================================
+# 👋 WELCOME MESSAGE SETTINGS
+# =============================================================================
+
+# Welcome message style: auto, repo, folder, or session (default: auto)
+WELCOME_STYLE=auto
+
+# Show autocomplete guide in welcome message (default: true)
+AUTOCOMPLETE_GUIDE=true
+
+# Show keyboard shortcuts in welcome message (default: true)
+SHORTCUTS=true

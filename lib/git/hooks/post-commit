@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 📝 POST-COMMIT HOOK - Dependency Audit Logging
+# =============================================================================
+# Runs AFTER commits to log dependency changes for security auditing
+# Logs to ~/.phantom-guard-audit.log
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Source hook bootstrap (environment setup)
+# =============================================================================
+# Resolve symlinks so relative paths work from installed (~/.githooks/) location
+# shellcheck source=../shared/hook-bootstrap.sh
+_hook_real="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+source "$(dirname "$_hook_real")/../shared/hook-bootstrap.sh"
+unset _hook_real
+
+# Audit log location
+AUDIT_LOG="${HOME}/.phantom-guard-audit.log"
+mkdir -p "$(dirname "$AUDIT_LOG")"
+
+# Dependency files to check
+DEPS_FILES=(
+    "package.json"
+    "package-lock.json"
+    "requirements.txt"
+    "Pipfile"
+    "pyproject.toml"
+    "Cargo.toml"
+    "go.mod"
+    "Gemfile"
+    "composer.json"
+)
+
+# Get list of changed dependency files in this commit
+changed_deps=()
+for dep_file in "${DEPS_FILES[@]}"; do
+    # Check if this is not the initial commit (HEAD~1 exists)
+    if git rev-parse HEAD~1 &>/dev/null; then
+        if git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -q "^${dep_file}$"; then
+            if [[ -f "$dep_file" ]]; then
+                changed_deps+=("$dep_file")
+            fi
+        fi
+    fi
+done
+
+# Exit early if no dependency files changed
+if [[ ${#changed_deps[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+# Get commit metadata
+commit_hash=$(git rev-parse HEAD)
+commit_author=$(git log -1 --format='%an <%ae>')
+commit_date=$(git log -1 --format='%ai')
+commit_msg=$(git log -1 --format='%s' | head -n1 | sed 's/[^a-zA-Z0-9 _-]//g')
+repo_url=$(git remote get-url origin 2>/dev/null || echo 'local')
+branch_name=$(git rev-parse --abbrev-ref HEAD)
+
+# Log to audit file atomically
+{
+    echo "=========================================="
+    echo "Dependency Change Detected"
+    echo "=========================================="
+    echo "Date: $commit_date"
+    echo "Commit: $commit_hash"
+    echo "Author: $commit_author"
+    echo "Message: $commit_msg"
+    echo "Repository: $repo_url"
+    echo "Branch: $branch_name"
+    echo "Files Changed: ${changed_deps[*]}"
+    echo "=========================================="
+    echo ""
+} >>"$AUDIT_LOG"
+
+echo -e "${BLUE}📝 Dependency change logged to: $AUDIT_LOG${NC}"
+echo -e "${GREEN}✅ Commit completed - audit trail updated${NC}"

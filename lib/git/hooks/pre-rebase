@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 🛡️  PRE-REBASE HOOK - Prevent Accidental History Loss
+# =============================================================================
+# Runs before git rebase to warn about potential data loss.
+# Protects branches that should not be rebased (main, master, production).
+# Checks:
+#   1. Detect if rebasing protected branches
+#   2. Warn about force-push requirements after rebase
+#   3. Provide option to abort if user is unsure
+# Bypass: git rebase --no-verify
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Source hook bootstrap (environment setup)
+# =============================================================================
+# Resolve symlinks so relative paths work from installed (~/.githooks/) location
+# shellcheck source=../shared/hook-bootstrap.sh
+_hook_real="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+source "$(dirname "$_hook_real")/../shared/hook-bootstrap.sh"
+unset _hook_real
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+# Get current branch name
+get_current_branch() {
+    git symbolic-ref --short HEAD 2>/dev/null || echo ""
+}
+
+# Check if branch is protected (should not be rebased)
+is_protected_branch() {
+    local branch="$1"
+
+    # List of protected branches that should never be rebased
+    local protected_branches=(
+        "main"
+        "master"
+        "production"
+        "prod"
+        "staging"
+        "release"
+        "deploy"
+    )
+
+    for protected in "${protected_branches[@]}"; do
+        if [[ "$branch" == "$protected" ]] || [[ "$branch" == "$protected/"* ]]; then
+            return 0 # Branch is protected
+        fi
+    done
+
+    return 1 # Branch is not protected
+}
+
+# Check if branch has upstream (i.e., has been pushed)
+has_upstream() {
+    local branch="$1"
+
+    git rev-parse --verify "$branch@{u}" >/dev/null 2>&1
+}
+
+# =============================================================================
+# MAIN VALIDATION
+# =============================================================================
+
+main() {
+    # Get the upstream branch (if any) and the new base branch
+    # shellcheck disable=SC2034  # upstream reserved for future use
+    local upstream="${1:-}"
+    local onto="${2:-}"
+
+    # Get current branch
+    local current_branch
+    current_branch=$(get_current_branch)
+
+    if [[ -z "$current_branch" ]]; then
+        # Detached HEAD - allow rebase
+        exit 0
+    fi
+
+    # =============================================================================
+    # 1. Check if current branch is protected
+    # =============================================================================
+    if is_protected_branch "$current_branch"; then
+        echo -e "${RED}❌ ERROR: Cannot rebase protected branch: $current_branch${NC}" >&2
+        echo "" >&2
+        echo "WHY: Rebasing $current_branch rewrites public history and breaks collaboration" >&2
+        echo "FIX: Create a feature branch instead:" >&2
+        echo "  git checkout -b feature/my-changes" >&2
+        echo "  git rebase main" >&2
+        echo "" >&2
+        echo "To bypass this check (dangerous):" >&2
+        echo "  git rebase --no-verify" >&2
+        exit 1
+    fi
+
+    # =============================================================================
+    # 2. Check if current branch has upstream (has been pushed)
+    # =============================================================================
+    if has_upstream "$current_branch"; then
+        # Branch has been pushed - rebase will require force push
+        echo -e "${YELLOW}⚠️  WARNING: Rebasing '$current_branch' which has been pushed${NC}" >&2
+        echo "" >&2
+        echo "This will rewrite the history of '$current_branch'." >&2
+        echo "After rebase, you will need to force push:" >&2
+        echo -e "  ${BLUE}git push --force-with-lease origin $current_branch${NC}" >&2
+        echo "" >&2
+        echo "⚠️  FORCE PUSH WARNING:" >&2
+        echo "  - Force pushing will overwrite the remote branch" >&2
+        echo "  - Other collaborators will have to re-clone or reset their branches" >&2
+        echo "  - Any commits on the remote that aren't locally will be lost" >&2
+        echo "" >&2
+
+        # Check if onto is a protected branch
+        if [[ -n "$onto" ]] && is_protected_branch "$onto"; then
+            echo -e "${RED}❌ ERROR: Cannot rebase onto protected branch: $onto${NC}" >&2
+            echo "" >&2
+            echo "WHY: Rebasing onto $onto and force-pushing breaks the shared history" >&2
+            echo "FIX: Merge instead of rebasing:" >&2
+            echo -e "  ${BLUE}git merge $onto${NC}" >&2
+            echo "" >&2
+            echo "To bypass this check (dangerous):" >&2
+            echo "  git rebase --no-verify" >&2
+            exit 1
+        fi
+
+        # Provide helpful information but don't block
+        echo -e "${BLUE}ℹ️  To continue with rebase, press Enter. To cancel, press Ctrl+C.${NC}" >&2
+        # Note: Can't use read in git hook (non-interactive requirement)
+        # Just display warning and allow to proceed
+    fi
+
+    # =============================================================================
+    # All checks passed
+    # =============================================================================
+    exit 0
+}
+
+# Run main function
+main "$@"

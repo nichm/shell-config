@@ -1,0 +1,39 @@
+{
+  "mcpServers": {
+    "exa": {
+      "type": "http",
+      "url": "https://mcp.exa.ai/mcp",
+      "headers": {
+        "Authorization": "Bearer ${EXA_API_BEARER_TOKEN}"
+      },
+      "tools": ["get_code_context_exa", "web_search_exa", "company_research", "crawling"]
+    },
+    "sequential-thinking": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["x", "mcp-sequential-thinking"]
+    },
+    "context7-mcp": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["x", "@upstash/context7-mcp@latest"]
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": ["chrome-devtools-mcp@latest"]
+    },
+    "clear-thought-mcp": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": [
+        "-y",
+        "@smithery/cli@latest",
+        "run",
+        "@ThinkFar/clear-thought-mcp",
+        "--key",
+        "${CLEAR_THOUGHT_MCP_KEY}"
+      ]
+    }
+  }
+}

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 🔒 PRE-COMMIT HOOK - Thin Wrapper
+# =============================================================================
+# Delegates to lib/git/stages/commit/pre-commit.sh for actual validation.
+# This wrapper handles environment setup and calls the stage module.
+# Bypass all hooks: GIT_SKIP_HOOKS=1 git commit -m "message"
+# Checks performed (12+ parallel jobs):
+#   1. File length validation (3-tier blocking)
+#   2. Sensitive filename detection (.env, .pem, credentials)
+#   3. Syntax validation (JS/TS, Python, Shell, YAML, GHA workflows)
+#   4. Code formatting (prettier) - warnings or blocking
+#   5. Dependency file change warnings
+#   6. Large file detection (>5MB)
+#   7. Commit size analysis (3-tier system)
+#   8. OpenGrep security scanning
+#   9. Gitleaks secrets scanning
+#  10. Unit tests (bun test)
+#  11. TypeScript type checking (tsc --noEmit)
+#  12. Circular dependency detection (dpdm)
+#  13. Python type checking (mypy via uv)
+#  14. Infrastructure validation
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Source hook bootstrap (environment setup)
+# =============================================================================
+# Resolve symlinks so relative paths work from installed (~/.githooks/) location
+# shellcheck source=../shared/hook-bootstrap.sh
+_hook_real="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+source "$(dirname "$_hook_real")/../shared/hook-bootstrap.sh"
+unset _hook_real
+
+# =============================================================================
+# Skip hooks if requested
+# =============================================================================
+if hook_should_skip; then
+    hook_skip_exit "pre-commit"
+fi
+
+# =============================================================================
+# Get staged files (Bash 5.x readarray)
+# =============================================================================
+readarray -t FILES < <(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+# =============================================================================
+# Source and run the stage module
+# =============================================================================
+STAGE_MODULE="$SHELL_CONFIG_DIR/lib/git/stages/commit/pre-commit.sh"
+
+if [[ ! -f "$STAGE_MODULE" ]]; then
+    echo "❌ ERROR: Pre-commit stage module not found: $STAGE_MODULE" >&2
+    echo "ℹ️  WHY: The modular pre-commit validation pipeline is required" >&2
+    echo "💡 FIX: Run install.sh to restore shell-config, or use --no-verify to bypass" >&2
+    exit 1
+fi
+
+source "$STAGE_MODULE"
+
+if run_pre_commit_checks "${FILES[@]}"; then
+    exit 0
+else
+    exit 1
+fi

@@ -1,0 +1,43 @@
+Function,Time_ms,Rating,Category
+zsh (no config),1.32,GREAT,startup
+zsh -i (full startup),209.90,OK,startup
+source init.sh only,183.52,OK,startup
+welcome_message (full),62.06,MID,welcome
+node version detection,12.04,GREAT,welcome
+python version detection,7.33,GREAT,welcome
+minimal_init (all disabled),21.38,GREAT,startup
+detect_os,1.46,GREAT,platform
+is_macos,0.30,GREAT,platform
+has_brew,0.34,GREAT,platform
+get_homebrew_prefix,1.53,GREAT,platform
+log_info,0.07,GREAT,colors
+log_success,0.00,GREAT,colors
+log_error,0.09,GREAT,colors
+count_file_lines,2.08,GREAT,file-ops
+get_file_extension,0.32,GREAT,file-ops
+is_shell_script,0.96,GREAT,file-ops
+find_repo_root,0.31,GREAT,file-ops
+_ts_check_1password,0.58,GREAT,terminal-status
+_ts_check_git_wrapper,0.31,GREAT,terminal-status
+_ts_check_eza,0.41,GREAT,terminal-status
+_ts_count_aliases,0.26,GREAT,terminal-status
+command -v (100x),2.93,GREAT,cmd-check
+type (100x),2.23,GREAT,cmd-check
+(($+commands[])) (100x),1.45,GREAT,cmd-check
+source colors.sh,0.02,GREAT,source
+source platform.sh,0.27,GREAT,source
+source 3 common libs,0.86,GREAT,source
+git status --porcelain,11.48,MID,git
+git branch --show-current,5.48,MID,git
+git log -5 --oneline,6.27,MID,git
+git diff --stat,9.62,MID,git
+git status (via wrapper),18.14,MID,git-wrapped
+git branch (via wrapper),11.63,MID,git-wrapped
+git_statusline,6.94,MID,ghls
+shellcheck (1 file),29.65,GREAT,validation
+shellcheck (5 files),43.54,GREAT,validation
+actionlint (1 workflow),42.47,GREAT,gha
+actionlint (all workflows),139.31,MID,gha
+zizmor (1 workflow),24.90,GREAT,gha
+validate_file_length,3.04,GREAT,validation
+security_validator,3.24,GREAT,validation

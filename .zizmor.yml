@@ -1,0 +1,43 @@
+# =============================================================================
+# Zizmor Configuration - GitHub Actions Security Scanner
+# =============================================================================
+# Tuned to reduce noise - only flag high-confidence, actionable issues
+# =============================================================================
+
+rules:
+  # DISABLED: We use semver tags (v4, v8) for trusted first-party actions
+  # SHA pinning is too noisy and hard to maintain
+  unpinned-uses:
+    disable: true
+
+  # Template injection - most are false positives from:
+  # - workflow_dispatch inputs (controlled by repo admins)
+  # - step outputs (internal, not user-controlled)
+  template-injection:
+    disable: false
+    ignore:
+      # Workflow dispatch inputs are controlled by repo admins, not attackers
+      - "node-to-bun-workflow.yml"
+      # Step outputs from our own steps are safe
+      - "auto-fix.yml"
+      - "ci.yml"
+      - "claude.yml"
+      - "claude-code-review.yml"
+      - "scrumbot.yml"
+      - "qodo-review.yml"
+      - "package-checker.yml"
+      - "gha-security-scan.yml"
+
+  # Artipacked (credential persistence) - informational, not blocking
+  artipacked:
+    disable: true
+
+  # Excessive permissions - useful but noisy, disable for now
+  excessive-permissions:
+    disable: true
+
+  # KEEP ENABLED (actually useful):
+  # - dangerous-triggers (pull_request_target issues)
+  # - unsound-condition (actual bugs in if: conditions)
+  # - cache-poisoning
+  # - self-hosted-runner

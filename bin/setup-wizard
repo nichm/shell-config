@@ -1,0 +1,465 @@
+#!/usr/bin/env bash
+# =============================================================================
+# setup-wizard.sh - Interactive environment configuration wizard
+# =============================================================================
+# Guides users through personalizing their shell-config repository setup.
+# This is the ONLY interactive script in the repository (by design).
+#
+# Usage:
+#   ./bin/setup-wizard [--non-interactive]
+#
+# Options:
+#   --non-interactive  Run without prompts (use defaults/exit)
+#   -h, --help         Show this help message
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# SCRIPT SETUP
+# =============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$SCRIPT_DIR/lib/core/colors.sh"
+source "$SCRIPT_DIR/lib/core/platform.sh"
+source "$SCRIPT_DIR/lib/core/command-cache.sh"
+
+# Wizard state
+WIZARD_NON_INTERACTIVE=false
+CONFIG_FILES_UPDATED=()
+TEMP_BACKUPS=()
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+# Escape special characters for sed replacement
+escape_for_sed() {
+    printf '%s\n' "$1" | sed -e 's/[\/&]/\\&/g'
+}
+
+# Escape special characters for sed replacement with pipe delimiter
+escape_for_sed_pipe() {
+    printf '%s\n' "$1" | sed -e 's/[\/&|]/\\&/g'
+}
+
+# Print section header
+print_header() {
+    local text="$1"
+    printf "\n${BOLD}${CYAN}═══════════════════════════════════════════════════${NC}\n"
+    printf "${BOLD}${CYAN}  %s${NC}\n" "$text"
+    printf "${BOLD}${CYAN}═══════════════════════════════════════════════════${NC}\n\n"
+}
+
+# Print success message
+print_success() {
+    printf "${GREEN}✅ %s${NC}\n" "$1"
+}
+
+# Print info message
+print_info() {
+    printf "${CYAN}ℹ️  %s${NC}\n" "$1"
+}
+
+# Print warning
+print_warning() {
+    printf "${YELLOW}⚠️  %s${NC}\n" "$1"
+}
+
+# Print error with WHAT/WHY/FIX format
+print_error() {
+    local msg="$1"
+    local why="${2:-}"
+    local fix="${3:-}"
+    printf "${RED}❌ ERROR: %s${NC}\n" "$msg" >&2
+    if [[ -n "$why" ]]; then
+        printf "${RED}ℹ️  WHY: %s${NC}\n" "$why" >&2
+    fi
+    if [[ -n "$fix" ]]; then
+        printf "${RED}💡 FIX: %s${NC}\n" "$fix" >&2
+    fi
+}
+
+# Prompt user for input (with non-interactive fallback)
+prompt_user() {
+    local prompt_text="$1"
+    local default_value="${2:-}"
+    local result_var="$3"
+
+    if [[ "$WIZARD_NON_INTERACTIVE" == true ]]; then
+        if [[ -n "$default_value" ]]; then
+            printf -v "$result_var" '%s' "$default_value"
+            return 0
+        else
+            print_error "Non-interactive mode requires default value" \
+                "Cannot proceed without a value for: $prompt_text" \
+                "Run with defaults or provide default values"
+            return 1
+        fi
+    fi
+
+    local prompt_display="$prompt_text"
+    if [[ -n "$default_value" ]]; then
+        prompt_display="$prompt_text [$default_value]"
+    fi
+
+    local user_input
+    read -rp "$(printf "${GREEN}? ${NC}%s: " "$prompt_display")" user_input
+    printf -v "$result_var" '%s' "${user_input:-$default_value}"
+}
+
+# Confirm with user
+confirm_user() {
+    local prompt_text="$1"
+    local default_yes="${2:-false}"
+
+    if [[ "$WIZARD_NON_INTERACTIVE" == true ]]; then
+        return 0  # Assume yes in non-interactive mode
+    fi
+
+    local prompt_display="$prompt_text"
+    if [[ "$default_yes" == true ]]; then
+        prompt_display="$prompt_text [Y/n]"
+    else
+        prompt_display="$prompt_text [y/N]"
+    fi
+
+    while true; do
+        local yn
+        read -rp "$(printf "${GREEN}? ${NC}%s: " "$prompt_display")" yn
+        yn=${yn:-$( [[ "$default_yes" == true ]] && echo "y" || echo "n" )}
+
+        case "$yn" in
+            [Yy]*) return 0 ;;
+            [Nn]*) return 1 ;;
+            *) printf "Please answer yes or no.\n" ;;
+        esac
+    done
+}
+
+# Backup existing file
+backup_file() {
+    local file="$1"
+    if [[ -f "$file" ]]; then
+        local timestamp
+        timestamp=$(date +%Y%m%d_%H%M%S)
+        local backup="${file}.backup.${timestamp}"
+        cp "$file" "$backup"
+        TEMP_BACKUPS+=("$backup")
+        print_info "Backed up $file to $backup"
+    fi
+}
+
+# Cleanup temporary backup files
+cleanup_backups() {
+    for f in "${TEMP_BACKUPS[@]}"; do
+        rm -f "$f" 2>/dev/null || true
+    done
+}
+
+# Register cleanup handler
+trap cleanup_backups EXIT INT TERM
+
+# =============================================================================
+# WIZARD STEPS
+# =============================================================================
+
+# Step 1: Welcome
+step_welcome() {
+    print_header "Welcome to Shell-Config Setup"
+
+    cat <<'EOF'
+This wizard will help you personalize your shell-config repository.
+
+You will be prompted to configure:
+  • Git user settings (name, email)
+  • SSH configuration (hosts, keys)
+  • Server aliases (quick shortcuts)
+  • CODEOWNERS file (for code reviews)
+
+All changes will be made to local config files. You can review and edit
+them manually after the wizard completes.
+
+Press Enter to continue, or Ctrl+C to exit.
+EOF
+
+    [[ "$WIZARD_NON_INTERACTIVE" == false ]] && read -r
+}
+
+# Step 2: Git Configuration
+step_git_config() {
+    print_header "Git Configuration"
+
+    local gitconfig_file="$SCRIPT_DIR/config/gitconfig"
+    local current_name current_email new_name new_email
+
+    # Extract current values using git config (safer than grep/sed)
+    if [[ -f "$gitconfig_file" ]]; then
+        current_name=$(git config --file "$gitconfig_file" user.name 2>/dev/null || echo "")
+        current_email=$(git config --file "$gitconfig_file" user.email 2>/dev/null || echo "")
+    fi
+
+    # Show current values
+    if [[ -n "$current_name" && "$current_name" != *"Your Name"* ]]; then
+        print_info "Current Git name: $current_name"
+    fi
+    if [[ -n "$current_email" && "$current_email" != *"your.email"* ]]; then
+        print_info "Current Git email: $current_email"
+    fi
+
+    echo ""
+
+    # Prompt for new values
+    prompt_user "Your Git user name" "$current_name" new_name
+    prompt_user "Your Git email" "$current_email" new_email
+
+    if [[ -z "$new_name" || -z "$new_email" ]]; then
+        print_warning "Skipping Git configuration (empty values)"
+        return
+    fi
+
+    # Update gitconfig
+    backup_file "$gitconfig_file"
+
+    # Use sed to replace name and email with proper escaping
+    if [[ -f "$gitconfig_file" ]]; then
+        local escaped_name escaped_email
+        escaped_name=$(escape_for_sed "$new_name")
+        escaped_email=$(escape_for_sed "$new_email")
+
+        if is_macos; then
+            sed -i '' "s/^\s*name = .*/\tname = $escaped_name/" "$gitconfig_file"
+            sed -i '' "s/^\s*email = .*/\temail = $escaped_email/" "$gitconfig_file"
+        else
+            sed -i "s/^\s*name = .*/\tname = $escaped_name/" "$gitconfig_file"
+            sed -i "s/^\s*email = .*/\temail = $escaped_email/" "$gitconfig_file"
+        fi
+    fi
+
+    print_success "Git configuration updated"
+    print_info "  Name: $new_name"
+    print_info "  Email: $new_email"
+
+    CONFIG_FILES_UPDATED+=("$gitconfig_file")
+}
+
+# Step 3: SSH Configuration
+step_ssh_config() {
+    print_header "SSH Configuration"
+
+    local sshconfig_file="$SCRIPT_DIR/config/ssh-config"
+
+    print_info "SSH configuration is located at: $sshconfig_file"
+    echo ""
+    print_info "Common things to configure:"
+    echo "  • 1Password SSH agent (macOS)"
+    echo "  • Personal server hosts"
+    echo "  • SSH key paths"
+    echo ""
+
+    if ! confirm_user "Do you want to configure SSH now?" true; then
+        print_warning "Skipping SSH configuration"
+        print_info "You can edit $sshconfig_file manually later"
+        return
+    fi
+
+    # Show current file
+    if [[ -f "$sshconfig_file" ]]; then
+        print_info "Current SSH config:"
+        echo "----------------------------------------"
+        head -n 30 "$sshconfig_file"
+        echo "----------------------------------------"
+        echo ""
+    fi
+
+    print_info "Recommended actions:"
+    echo "  1. Remove or update server entries with personal IPs"
+    echo "  2. Add your own server Host entries"
+    echo "  3. Verify 1Password SSH agent path (macOS)"
+    echo ""
+
+    if [[ "$WIZARD_NON_INTERACTIVE" == false ]]; then
+        prompt_user "Open $sshconfig_file in editor? (nano/vim/skip to edit manually)" "skip" editor_cmd
+
+        if [[ -n "$editor_cmd" && "$editor_cmd" != "skip" ]]; then
+            if command_exists "$editor_cmd"; then
+                if "$editor_cmd" "$sshconfig_file"; then
+                    print_success "SSH config updated"
+                    CONFIG_FILES_UPDATED+=("$sshconfig_file")
+                else
+                    print_warning "Editor exited with error. File may not be updated."
+                fi
+            else
+                print_warning "Editor '$editor_cmd' not found. Please edit manually."
+            fi
+        else
+            print_info "Skipping editor. You can edit $sshconfig_file manually."
+        fi
+    fi
+}
+
+# Step 4: Server Aliases
+step_server_aliases() {
+    print_header "Server Aliases"
+
+    local servers_file="$SCRIPT_DIR/lib/aliases/servers.sh"
+
+    print_info "Server aliases file: $servers_file"
+    echo ""
+
+    if [[ -f "$servers_file" ]]; then
+        print_info "Current server aliases:"
+        echo "----------------------------------------"
+        grep "^alias " "$servers_file" 2>/dev/null || echo "# No aliases defined yet"
+        echo "----------------------------------------"
+        echo ""
+    fi
+
+    print_info "Add server aliases for quick SSH access, e.g.:"
+    echo "  alias prod='ssh user@production.com'"
+    echo "  alias staging='ssh deploy@staging.com'"
+    echo ""
+
+    if ! confirm_user "Do you want to add server aliases now?" false; then
+        print_warning "Skipping server aliases"
+        return
+    fi
+
+    if [[ "$WIZARD_NON_INTERACTIVE" == false ]]; then
+        prompt_user "Open $servers_file in editor? (nano/vim/skip)" "skip" editor_cmd
+
+        if [[ -n "$editor_cmd" && "$editor_cmd" != "skip" ]]; then
+            if command_exists "$editor_cmd"; then
+                if "$editor_cmd" "$servers_file"; then
+                    print_success "Server aliases updated"
+                    CONFIG_FILES_UPDATED+=("$servers_file")
+                else
+                    print_warning "Editor exited with error. File may not be updated."
+                fi
+            else
+                print_warning "Editor '$editor_cmd' not found. Please edit manually."
+            fi
+        fi
+    fi
+}
+
+# Step 5: CODEOWNERS
+step_codeowners() {
+    print_header "CODEOWNERS Configuration"
+
+    local codeowners_file="$SCRIPT_DIR/.github/CODEOWNERS"
+    local current_owner new_owner
+
+    if [[ ! -f "$codeowners_file" ]]; then
+        print_warning "CODEOWNERS file not found at $codeowners_file"
+        return
+    fi
+
+    # Extract current owner
+    current_owner=$(grep -E '^\*\s+@' "$codeowners_file" | head -1 | awk '{print $2}' || echo "")
+
+    if [[ -n "$current_owner" ]]; then
+        print_info "Current CODEOWNERS entry: $current_owner"
+    fi
+
+    echo ""
+    prompt_user "Your GitHub username (for CODEOWNERS)" "${current_owner#@}" new_owner
+
+    if [[ -z "$new_owner" ]]; then
+        print_warning "Skipping CODEOWNERS configuration"
+        return
+    fi
+
+    backup_file "$codeowners_file"
+
+    # Update CODEOWNERS with proper escaping
+    local escaped_owner
+    escaped_owner=$(escape_for_sed_pipe "$new_owner")
+
+    if is_macos; then
+        sed -i '' "s|^\*.*@.*|*       @$escaped_owner|" "$codeowners_file"
+    else
+        sed -i "s|^\*.*@.*|*       @$escaped_owner|" "$codeowners_file"
+    fi
+
+    print_success "CODEOWNERS updated"
+    print_info "  Owner: @$new_owner"
+
+    CONFIG_FILES_UPDATED+=("$codeowners_file")
+}
+
+# Step 6: Summary
+step_summary() {
+    print_header "Setup Complete"
+
+    if [[ ${#CONFIG_FILES_UPDATED[@]} -gt 0 ]]; then
+        print_success "Updated ${#CONFIG_FILES_UPDATED[@]} configuration file(s):"
+        echo ""
+        for file in "${CONFIG_FILES_UPDATED[@]}"; do
+            echo "  • ${file#$SCRIPT_DIR/}"
+        done
+    else
+        print_warning "No files were updated"
+    fi
+
+    echo ""
+    print_info "Next steps:"
+    echo "  1. Review updated files to ensure correctness"
+    echo "  2. Run: ./install.sh"
+    echo "  3. Open a new terminal to activate changes"
+    echo ""
+    print_info "For detailed setup instructions, see:"
+    echo "  📚 docs/ENV_SETUP.md"
+    echo ""
+}
+
+# =============================================================================
+# ARGUMENT PARSING
+# =============================================================================
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --non-interactive)
+                WIZARD_NON_INTERACTIVE=true
+                shift
+                ;;
+            -h|--help)
+                sed -n '/^# Usage:/,/^#/p' "$0" | sed 's/^# //' | head -n 6
+                exit 0
+                ;;
+            *)
+                echo "Unknown option: $1" >&2
+                echo "Use --help for usage information" >&2
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+main() {
+    parse_args "$@"
+
+    # Check if we're in the right directory
+    if [[ ! -f "$SCRIPT_DIR/install.sh" ]]; then
+        print_error "install.sh not found at $SCRIPT_DIR" \
+            "Setup wizard must be run from within the shell-config repository" \
+            "cd to the repository root and run ./bin/setup-wizard"
+        exit 1
+    fi
+
+    # Run wizard steps
+    step_welcome
+    step_git_config
+    step_ssh_config
+    step_server_aliases
+    step_codeowners
+    step_summary
+
+    print_success "Wizard completed successfully! 🚀"
+}
+
+main "$@"

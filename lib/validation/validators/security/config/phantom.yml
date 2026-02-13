@@ -1,0 +1,87 @@
+# =============================================================================
+# 🛡️ PHANTOM GUARD CONFIGURATION
+# =============================================================================
+# Protects against typosquatting and slopsquatting attacks
+# Location: ~/.phantom-guard/config.yml
+# ⚠️  SECURITY WARNING:
+# This tool helps protect against supply chain attacks.
+# Bypassing these checks (--no-verify) exposes your project to security risks.
+# =============================================================================
+
+# Risk score threshold (0-100)
+# Scores above this threshold will be flagged as suspicious
+# 30-40: High security (strict) | 50: Medium (DEFAULT) | 60+: Low security
+risk_threshold: 50
+
+# =============================================================================
+# SECURITY CHECKS
+# =============================================================================
+
+checks:
+  zero_downloads: true              # Flag packages with no downloads
+  recently_published: true          # Flag packages < 30 days old
+  recently_published_days: 30
+  few_maintainers: true             # Flag packages with few maintainers
+  min_maintainers: 1
+  no_repository: true               # Flag packages without source repo
+  suspicious_names: true            # Flag typosquatting-like names
+  few_versions: true                # Flag packages with very few versions
+  min_versions: 1
+
+# =============================================================================
+# PACKAGE MANAGER SETTINGS
+# =============================================================================
+
+package_managers:
+  npm:
+    safe_patterns:
+      - "^@types/.*"               # DefinitelyTyped
+      - "^@babel/.*"               # Babel official
+      - "^@testing-library/.*"     # Testing Library
+      - "^@angular/.*"             # Angular official
+
+    suspicious_patterns:
+      - ".*-react-native-firebase$"  # Common typosquat
+      - ".*-helper$"                 # Generic suffix abuse
+      - ".*-utils-free$"             # "Free" often = malware
+      - ".*-libary$"                 # Misspelled "library"
+
+  pypi:
+    safe_patterns:
+      - "^django-.*"
+      - "^flask-.*"
+      - "^pytest-.*"
+
+    suspicious_patterns:
+      - ".*-request$"              # requests typosquatting
+      - ".*-urlib$"                # urllib typosquatting
+
+# =============================================================================
+# PERFORMANCE SETTINGS
+# =============================================================================
+
+performance:
+  parallel_validation: true         # Validate multiple packages at once
+  max_concurrent: 5                 # Max concurrent validations
+  enable_cache: true                # Cache results
+  cache_ttl: 300                    # Cache for 5 minutes
+  network_timeout: 10               # Network timeout (seconds)
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+logging:
+  audit_log: "~/.phantom-guard-audit.log"
+  cache_dir: "~/.phantom-guard-cache"
+  verbose: false
+  debug: false
+
+# =============================================================================
+# ADVANCED OPTIONS
+# =============================================================================
+
+advanced:
+  allowlist: []                     # Always trust these packages
+  blocklist: []                     # Always reject these packages
+  custom_registries: {}             # Private registry URLs

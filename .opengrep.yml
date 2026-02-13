@@ -1,0 +1,128 @@
+# =============================================================================
+# 🔍 OpenGrep Configuration - Semantic Code Analysis
+# =============================================================================
+# OpenGrep is a fast, open-source semantic code analysis tool
+# 3.15x faster than Semgrep with identical rule compatibility
+#
+# Run manually: opengrep --config .opengrep.yml .
+# Auto-runs in: pre-commit git hook (if installed)
+# =============================================================================
+
+# === Rule Sets ===
+# Comprehensive rule collections for security and code quality
+# GLOBAL CONFIGURATION: Designed for use across all projects on this computer
+#
+# OpenGrep automatically filters rules by file type, so including all packs
+# has minimal overhead (~0.2s startup) and provides comprehensive coverage
+# for any project you work on.
+#
+# Performance: Only loads rules matching detected languages (zero-cost for unused languages)
+# Startup: ~0.7s for all rule packs vs ~0.5s for minimal set
+# Memory: ~55MB vs ~50MB (5MB difference for unlimited language support)
+rules:
+  # === Core Security ===
+  - p/security # General security patterns (SQL injection, XSS, etc.)
+
+  # === Web Languages ===
+  - p/javascript # JavaScript security and quality
+  - p/typescript # TypeScript-specific rules
+  - p/html # HTML security and best practices
+
+  # === Backend Languages ===
+  - p/python # Python security and quality
+  - p/rust # Rust security (unsafe blocks, unwrap issues)
+  - p/go # Go security and concurrency
+  - p/java # Java security (deserialization, injection)
+  - p/csharp # C# security patterns
+  - p/ruby # Ruby security (Rails-specific issues)
+  - p/php # PHP security patterns
+
+  # === Scripting & Configuration ===
+  - p/bash # Shell script security
+  - p/yaml # YAML/CI/CD configuration security
+  - p/json # JSON configuration validation
+
+  # === Infrastructure ===
+  - p/terraform # Terraform security and best practices
+  - p/dockerfile # Docker security best practices
+
+  # === Code Quality ===
+  - p/correctness # Bug detection and logic errors
+  - p/best-practices # Industry best practices and idioms
+
+# === Framework Coverage ===
+# While OpenGrep doesn't have framework-specific rule packs, these frameworks
+# are covered by the language-specific rules above:
+#
+# **Next.js** → Covered by p/javascript and p/typescript
+#   - Server actions security
+#   - API route validation
+#   - Client-side data handling
+#   - React component security
+#
+# **Vite** → Covered by p/javascript and p/typescript
+#   - Build configuration security
+#   - Module import patterns
+#   - Plugin configuration validation
+#
+# **Supabase** → Covered by p/javascript, p/typescript, and p/security
+#   - SQL injection detection (via p/security)
+#   - Client-side authentication patterns
+#   - API key exposure detection
+#   - RLS (Row Level Security) policy validation
+#
+# **SQL Security** → Covered by p/security across all languages
+#   - SQL injection in Python, JavaScript, Go, Rust, etc.
+#   - ORM misuse detection
+#   - Raw query validation
+
+# === File Exclusions ===
+# Skip these directories and file patterns
+exclude:
+  # Dependencies
+  - node_modules/
+  - vendor/
+  - third_party/
+
+  # Build outputs
+  - dist/
+  - build/
+  - out/
+  - .next/
+  - .turbo/
+
+  # Testing
+  - "**/*.test.js"
+  - "**/*.test.ts"
+  - "**/*.spec.js"
+  - "**/*.spec.ts"
+  - __tests__/
+  - test/
+  - tests/
+
+  # Generated code
+  - "**/*.min.js"
+  - "**/*.min.css"
+  - "**/*.pb.go"
+  - "**/*.generated.ts"
+
+  # Documentation
+  - "**/*.md"
+  - "**/LICENSE*"
+
+# === Performance Settings ===
+# Note: No timeout - security scans are worth waiting for
+# OpenGrep will take as long as needed to complete comprehensive scans
+
+# Maximum file size to analyze (in MB)
+max-target-bytes: 1048576 # 1MB
+
+# === Severity Levels ===
+# minimum severity to report: ERROR, WARNING, INFO (default: WARNING)
+# Using WARNING to catch issues early before they become critical
+severity: WARNING
+
+# === Output Format ===
+# Available: text, json, sarif, emacs
+# For git hooks, use 'text' for human-readable output
+output: text

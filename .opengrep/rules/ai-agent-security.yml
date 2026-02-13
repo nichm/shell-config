@@ -1,0 +1,353 @@
+# =============================================================================
+# AI Agent Security Rules for OpenGrep
+# =============================================================================
+# Detects AI agent vulnerabilities NOT covered by traditional security tools:
+#   - Prompt injection patterns
+#   - MCP server configuration issues
+#   - Tool parameter validation gaps
+#   - LLM API key exposure
+#   - Excessive autonomy
+#   - Context boundary violations
+#
+# These patterns are SEMANTIC, not syntactic - traditional tools like
+# shellcheck, oxlint, and Gitleaks cannot detect them.
+#
+# Run: opengrep --config .opengrep.yml .
+# =============================================================================
+
+rules:
+  # === Prompt Injection Detection ===
+  # Direct string interpolation into LLM prompts without sanitization
+
+  - id: python-prompt-injection-fstring
+    pattern: $PROMPT = f"...{$UNTRUSTED}..."
+    message: Direct f-string concatenation into prompt (prompt injection risk)
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-1336: Prompt Injection"
+      owasp: "AIO1:2023 - Prompt Injection"
+      references:
+        - https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html
+
+  - id: python-prompt-injection-format
+    pattern: $PROMPT = "...".format($UNTRUSTED)
+    message: String format into prompt (prompt injection risk)
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-1336: Prompt Injection"
+
+  - id: python-prompt-injection-percent
+    pattern: $PROMPT = "... %s" % $UNTRUSTED
+    message: Percent formatting into prompt (prompt injection risk)
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-1336: Prompt Injection"
+
+  - id: python-prompt-injection-concat
+    pattern: $PROMPT = "..." + $UNTRUSTED + "..."
+    message: String concatenation into prompt (prompt injection risk)
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-1336: Prompt Injection"
+
+  - id: javascript-prompt-injection-template
+    pattern: const $PROMPT = `...${$UNTRUSTED}...`;
+    message: Template literal into prompt (prompt injection risk)
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-1336: Prompt Injection"
+
+  - id: javascript-prompt-injection-concat
+    pattern: $PROMPT = "..." + $UNTRUSTED + "..."
+    message: String concatenation into prompt (prompt injection risk)
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-1336: Prompt Injection"
+
+  - id: python-llm-call-user-input
+    pattern: 'openai.$FUNC(..., messages=[{"role": "user", "content": $INPUT}], ...)'
+    message: Direct user input to LLM call (sanitize first)
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      remediation: "Use input sanitization and allowlist patterns"
+
+  - id: typescript-llm-call-user-input
+    pattern: 'openai.$FUNC(..., messages: [{role: "user", content: $INPUT}], ...)'
+    message: Direct user input to LLM call (sanitize first)
+    languages: [typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      remediation: "Use input sanitization and allowlist patterns"
+
+  # === MCP Configuration Security ===
+  # MCP servers with excessive permissions or context access
+
+  - id: mcp-sampling-all-servers-context
+    pattern: 'includeContext: "allServers"'
+    message: MCP sampling with broad context access (data exfiltration risk)
+    languages: [yaml, json]
+    severity: ERROR
+    metadata:
+      category: security
+      impact: "May allow MCP server to access data from other servers"
+      reference: "https://authzed.com/blog/timeline-mcp-breaches/"
+
+  - id: mcp-sampling-all-context
+    pattern: 'includeContext: "all"'
+    message: MCP sampling with all context access (review if necessary)
+    languages: [yaml, json]
+    severity: WARNING
+    metadata:
+      category: security
+      remediation: "Use 'ownServer' or specify exact servers"
+
+  - id: mcp-unrestricted-permissions
+    pattern: |
+      permissions:
+        - "*"
+    message: Wildcard MCP permissions (specify exact permissions)
+    languages: [yaml, json]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Use exact permission names instead of wildcard"
+
+  - id: mcp-disabled-authentication
+    pattern: 'authentication: "none"'
+    message: MCP server without authentication (security risk)
+    languages: [yaml, json]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Enable authentication for MCP servers"
+
+  - id: mcp-unrestricted-resource-access
+    pattern: |
+      resources:
+        - "*"
+    message: Unrestricted MCP resource access (specify exact resources)
+    languages: [yaml, json]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Specify exact resource paths instead of wildcard"
+
+  - id: mcp-cross-tenant-access
+    pattern: "allowCrossTenantAccess: true"
+    message: MCP cross-tenant access enabled (data privacy risk)
+    languages: [yaml, json]
+    severity: ERROR
+    metadata:
+      category: security
+      impact: "May allow accessing data across tenant boundaries"
+      reference: "Asana MCP breach (June 2025)"
+
+  - id: mcp-broad-server-access
+    pattern: 'serverAccess: "all"'
+    message: MCP with broad server access (specify exact servers)
+    languages: [yaml, json]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Specify exact server names instead of 'all'"
+
+  # === Tool Parameter Validation ===
+  # Missing schema validation for AI agent tool inputs
+
+  - id: typescript-tool-any-type
+    pattern: "const $TOOL = async ($PARAMS: any) => ..."
+    message: Tool with 'any' type (no schema validation)
+    languages: [typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Use Zod or similar schema validation library"
+      impact: "May allow injection attacks via tool parameters"
+
+  - id: python-tool-no-validation
+    pattern: |
+      def $TOOL($PARAMS):
+          return $FUNC($PARAMS)
+    message: Tool function without parameter validation
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Use Pydantic or similar validation library"
+      impact: "May allow injection attacks via tool parameters"
+
+  - id: javascript-tool-no-validation
+    pattern: |
+      function $TOOL($PARAMS) {
+        return $FUNC($PARAMS);
+      }
+    message: Tool function without parameter validation
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Use Zod or similar schema validation library"
+
+  - id: python-tool-exec-code-param
+    pattern: exec($PARAMS)
+    message: Tool executes code from parameters without validation
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      impact: "Remote code execution vulnerability"
+      reference: "CVE-2025-6514 (mcp-remote RCE)"
+
+  - id: typescript-tool-eval-param
+    pattern: eval($PARAMS.$PROP)
+    message: Tool evaluates code from parameters (RCE risk)
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      category: security
+      impact: "Remote code execution vulnerability"
+
+  - id: python-tool-subprocess-param
+    pattern: subprocess.run($PARAMS, shell=True)
+    message: Tool runs subprocess with parameters (command injection risk)
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      impact: "Command injection vulnerability"
+
+  # === LLM API Key Security ===
+  # Hardcoded LLM API keys in agent code
+
+  - id: python-hardcoded-openai-key
+    pattern: api_key = "sk-..."
+    message: Hardcoded OpenAI API key (use environment variables)
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Use os.getenv('OPENAI_API_KEY') instead"
+
+  - id: python-hardcoded-anthropic-key
+    pattern: api_key = "sk-ant-..."
+    message: Hardcoded Anthropic API key (use environment variables)
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Use os.getenv('ANTHROPIC_API_KEY') instead"
+
+  - id: javascript-hardcoded-llm-key
+    pattern: 'apiKey: "sk-..."'
+    message: Hardcoded LLM API key in object (use environment variables)
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Use process.env.API_KEY instead"
+
+  - id: env-llm-key-not-from-env
+    pattern: |
+      const apiKey = "sk-..."
+    message: LLM API key not from environment variable
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Use process.env to load API keys"
+
+  # === Excessive Autonomy ===
+  # Agents executing dangerous operations without human approval
+
+  - id: python-autonomous-system-command
+    pattern: subprocess.run($CMD, shell=True)
+    message: Autonomous system command execution (add human approval)
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      remediation: "Add human-in-the-loop approval for dangerous operations"
+
+  - id: python-autonomous-file-delete
+    pattern: |
+      os.remove($PATH)
+    message: Autonomous file deletion (add human approval)
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      remediation: "Add human-in-the-loop approval for destructive operations"
+
+  - id: python-autonomous-file-write
+    pattern: |
+      with open($PATH, "w") as f:
+          f.write($DATA)
+    message: Autonomous file write operation (review if necessary)
+    languages: [python]
+    severity: INFO
+    metadata:
+      category: security
+
+  - id: javascript-autonomous-system-command
+    pattern: |
+      exec($CMD)
+    message: Autonomous system command execution (add human approval)
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      remediation: "Add human-in-the-loop approval for dangerous operations"
+
+  # === Context Boundary Violations ===
+  # MCP servers accessing data outside their authorized scope
+
+  - id: mcp-server-access-all-databases
+    pattern: 'databases: ["*"]'
+    message: MCP server with wildcard database access
+    languages: [yaml, json]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Specify exact database names"
+
+  - id: mcp-server-access-all-tables
+    pattern: 'tables: ["*"]'
+    message: MCP server with wildcard table access
+    languages: [yaml, json]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Specify exact table names"
+
+  - id: mcp-broad-file-access
+    pattern: 'allowedPaths: "/*"'
+    message: MCP server with broad file system access
+    languages: [yaml, json]
+    severity: ERROR
+    metadata:
+      category: security
+      remediation: "Restrict to specific directories"
+
+  - id: python-llm-unrestricted-tool-access
+    pattern: tools=$ALL_TOOLS
+    message: LLM with unrestricted tool access (specify exact tools)
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      remediation: "Specify exact tool list instead of wildcard"

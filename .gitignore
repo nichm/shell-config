@@ -1,0 +1,14 @@
+# Local config with secrets (stored in repo but not tracked)
+config/zshrc.local
+
+# Recursive symlink created when repo IS ~/.shell-config
+shell-config
+
+# Audit log symlink (created by ensure-audit-symlink.sh)
+logs/
+
+# Personal configuration (user-specific, not tracked)
+config/personal.env
+config/gitconfig.local
+config/ssh-config.local
+config/ssh-config

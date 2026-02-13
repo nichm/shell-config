@@ -1,0 +1,27 @@
+#!/bin/bash
+# =============================================================================
+# Basic Bash Configuration
+# Minimal setup for bash shells
+# =============================================================================
+
+# Homebrew path
+[[ -d "/opt/homebrew/bin" ]] && export PATH="/opt/homebrew/bin:$PATH"
+
+# Basic aliases
+alias ll="ls -la"
+alias la="ls -A"
+alias l="ls -CF"
+
+# Load shell-config if available
+if [[ -f "$HOME/.shell-config/init.sh" ]]; then
+	source "$HOME/.shell-config/init.sh"
+fi
+
+# Load local bash config if exists
+[[ -f "$HOME/.bash_local" ]] && source "$HOME/.bash_local"
+
+# Cargo environment (Rust)
+[[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+
+# UV environment
+[[ -f "$HOME/.local/bin/env" ]] && source "$HOME/.local/bin/env"

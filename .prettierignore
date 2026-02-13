@@ -1,0 +1,38 @@
+# Prettier ignore for shell-config
+
+# Shell scripts
+*.sh
+
+# All lib/ directory (shell scripts)
+lib/
+
+# Test files
+tests/
+
+# Configuration files
+config/
+
+# Documentation (preserve formatting)
+*.md
+docs/
+
+# Build/generated files
+*.bats
+
+# Git
+.git/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+._*
+
+# Claude/AI config
+.claude/
+.gemini/
+
+# Logs
+*.log
