@@ -1,7 +1,6 @@
 # Shell-Config Architecture - Initialization
 
-**Version:** 1.0.0
-**Last Updated:** 2026-02-04
+**Last Updated:** 2026-02-13
 
 ---
 
@@ -65,32 +64,35 @@
 
 ## Performance Timing
 
-### Current Performance (macOS Apple Silicon)
+### Current Performance (Feb 2026, macOS Apple Silicon)
 
-| Component | Time | Percentage | Optimization Status |
-|-----------|------|------------|---------------------|
-| **Core loading** | ~50ms | 9% | ✅ Optimized |
-| **Feature modules** | ~350ms | 65% | ⚠️ Needs lazy loading |
-| **1Password secrets** | ~80ms | 15% | ⚠️ Could defer |
-| **ZSH compinit** | ~30ms | 6% | ✅ Cached |
-| **PATH setup** | ~20ms | 4% | ✅ Optimized |
-| **Other overhead** | ~10ms | 2% | ✅ Acceptable |
-| **Total** | **~540ms** | 100% | ⚠️ Target: <200ms |
+| Metric | Time | Rating |
+|--------|------|--------|
+| Full startup (`zsh -i`) | ~123ms | MID |
+| `source init.sh` only | ~98ms | MID |
+| Minimal init (all features off) | ~42ms | GREAT |
+| Welcome message | ~2ms | GREAT |
+| Git wrapper overhead | ~7ms | GREAT |
+| compinit (cached) | ~11ms | GREAT |
 
-### Optimization Timeline
+Feature overhead from ~98ms baseline (disabling each individually):
 
-**Implemented:**
-- ✅ Cached compinit (24h TTL) - saves ~100ms
-- ✅ Lazy fnm loading - saves ~25ms
-- ✅ Conditional eza --git - saves ~5ms
+| Feature Disabled | Init Time | Cost |
+|-----------------|-----------|------|
+| GIT_WRAPPER | ~79ms | ~19ms |
+| LOG_ROTATION | ~85ms | ~13ms |
+| COMMAND_SAFETY | ~103ms | ~(-5ms) |
+| WELCOME | ~107ms | ~(-9ms) |
+
+### Optimizations Applied
+
+- ✅ Cached compinit (24h TTL)
+- ✅ Lazy fnm loading (~25ms savings)
+- ✅ Conditional eza --git
 - ✅ Cached secrets scanning (300s TTL)
+- ✅ Optimized welcome system (was ~56ms, now ~2ms)
 
-**Planned:**
-- 🔄 Lazy load feature modules - estimated ~200ms savings
-- 🔄 Parallel module loading - estimated ~100ms savings
-- 🔄 Deferred 1Password authentication - estimated ~50ms savings
-
-**Target Performance:** ~190ms (with all planned optimizations)
+Run `./tools/benchmarking/benchmark.sh startup` for current numbers.
 
 ---
 
@@ -328,5 +330,5 @@ SHELL_CONFIG_WELCOME=false hyperfine "zsh -c 'source ~/.shell-config/init.sh'"
 ---
 
 *For more information, see:*
-- [README.md](../README.md) - User documentation
-- [PERFORMANCE](../performance/METRICS.md) - Performance metrics
+- [README.md](../../README.md) - User documentation
+- [Benchmarking](../../tools/benchmarking/) - Performance reports and benchmark tool

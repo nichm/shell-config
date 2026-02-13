@@ -708,7 +708,7 @@ bypass-alert
 ## Related Documentation
 
 - `shell-config/lib/command-safety/README.md` - Command-safety system documentation
-- `shell-config/docs/SYNTAX-VALIDATOR.md` - Shell configuration validation
+- `shell-config/docs/developers/SYNTAX-VALIDATOR.md` - Shell configuration validation
 - Issue #156 (internal) - RM bypass protection proposals
 - Issue #148 (internal) - Original bypass documentation
 

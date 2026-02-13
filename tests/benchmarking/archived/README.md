@@ -6,7 +6,7 @@ approaches to command-safety rule definitions (Issue #80, Feb 2026).
 The winner was **Readable Direct Registration** (`_rule` + `_fix` helpers), now
 implemented in production at `lib/command-safety/engine/rule-helpers.sh`.
 
-See `docs/YAML-RULES-BENCHMARK.md` for the full analysis and hyperfine results.
+See `docs/archived/YAML-RULES-BENCHMARK.md` for the full analysis and hyperfine results.
 
 ## Contents
 

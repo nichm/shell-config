@@ -1,17 +1,6 @@
 # Shell-Config Architecture - Overview
 
-**Version:** 1.0.0
-**Last Updated:** 2026-02-04
-
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [High-Level Architecture](#high-level-architecture)
-3. [Design Philosophy](#design-philosophy)
-4. [Performance Metrics](#performance-metrics)
-5. [Security Considerations](#security-considerations)
+**Last Updated:** 2026-02-13
 
 ---
 
@@ -53,14 +42,13 @@ Shell-Config is a modular shell configuration system for bash and zsh that provi
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
 │ Core Modules │    │ Feature Mods │    │Integrations  │
 │              │    │              │    │              │
-│ • config.sh  │    │ • git/       │    │ • cli/       │
-│ • platform.sh│    │ • fzf.sh     │    │ • git/       │
-│ • colors.sh  │    │ • eza.sh     │    │              │
-│ • logging.sh │    │ • ripgrep.sh │    │              │
-│              │    │ • command-   │    │              │
-│              │    │   safety/    │    │              │
-│              │    │ • welcome/   │    │              │
-│              │    │ • 1password/ │    │              │
+│ • config.sh  │    │ • git/       │    │ • 1password/ │
+│ • platform.sh│    │ • command-   │    │ • fzf.sh     │
+│ • colors.sh  │    │   safety/    │    │ • eza.sh     │
+│ • logging.sh │    │ • validation/│    │ • ripgrep.sh │
+│ • paths.sh   │    │ • security/  │    │ • ghls/      │
+│ • traps.sh   │    │ • welcome/   │    │ • cat.sh     │
+│ • cmd-cache  │    │ • aliases/   │    │ • broot.sh   │
 └──────────────┘    └──────────────┘    └──────────────┘
         │                    │                    │
         └────────────────────┼────────────────────┘
@@ -69,147 +57,145 @@ Shell-Config is a modular shell configuration system for bash and zsh that provi
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Validation & Safety                         │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │  • Pre-commit Hooks (syntax, deps, secrets, size)         │  │
-│  │  • Command Safety (npm blocks, rm warnings)               │  │
+│  │  • 7 Git Hooks (pre-commit through post-merge)            │  │
+│  │  • 15 Pre-commit Validators (syntax, deps, secrets, size) │  │
+│  │  • Command Safety (61 rules across 30+ commands)          │  │
 │  │  • Git Wrapper (dangerous operation warnings)             │  │
-│  │  • RM Protection (PATH wrapper + function override)       │  │
+│  │  • RM Protection (4-layer: PATH + function + trash +      │  │
+│  │    chflags)                                               │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Design Philosophy
+## Module Inventory
 
-### Unix Principles
+### Core (`lib/core/`)
 
-- **Do one thing well:** Each module has a single, clear purpose
-- **Compose together:** Modules work independently but integrate seamlessly
+| Module | Purpose |
+|--------|---------|
+| `config.sh` | Config loading (env vars → YAML → simple → defaults) |
+| `platform.sh` | OS/arch detection, `is_macos()`, `is_linux()` |
+| `colors.sh` | ANSI color constants (`$RED`, `$GREEN`, `$NC`) |
+| `logging.sh` | Atomic writes, log rotation |
+| `paths.sh` | PATH setup (`lib/bin` first) |
+| `command-cache.sh` | Cached `command_exists` lookups |
+| `protected-paths.sh` | Centralized path validation for destructive ops |
+| `traps.sh` | Cleanup trap handlers |
+| `doctor.sh` | Health check diagnostics |
 
-### Fail Loudly
+### Safety (`lib/command-safety/`, `lib/security/`, `lib/bin/`)
 
-- **Clear error messages:** Every error explains WHAT, WHY, and HOW to fix
-- **Non-zero exit codes:** Failures are explicit and trackable
-- **Audit logging:** All bypass operations logged for review
+| Module | Purpose |
+|--------|---------|
+| `command-safety/engine/` | Rule matching, display, logging (8 engine files) |
+| `command-safety/rules/` | 61 rules across 13 rule files (git, docker, k8s, terraform, etc.) |
+| `bin/rm` | PATH-based rm wrapper with protected paths |
+| `bin/command-enforce` | Universal PATH wrapper (26 symlinked commands) |
+| `security/hardening.sh` | Security settings |
+| `security/filesystem/protect.sh` | chflags kernel-level protection |
+| `security/rm/wrapper.sh` | Function override for interactive shells |
 
-### Non-Interactive
+### Git (`lib/git/`)
 
-- **No prompts:** All commands run without user input
-- **Automatable:** Safe for use in scripts and CI/CD
-- **Deterministic:** Same input produces same output
+| Module | Purpose |
+|--------|---------|
+| `wrapper.sh` | Safety checks on all git operations |
+| `setup.sh` | Git hooks installation |
+| `stages/commit/` | pre-commit, prepare-commit-msg, commit-msg, post-commit |
+| `stages/push/` | pre-push (test runner) |
+| `stages/merge/` | pre-merge-commit, post-merge (auto-install deps) |
+| `shared/` | Command parser, file scanner, safety checks, metrics |
 
-### Bash 5.x Required
+### Validation (`lib/validation/`)
 
-- **Modern features:** Uses associative arrays, readarray, case conversion, etc.
-- **macOS setup:** Requires `brew install bash` (system bash 3.2.57 not supported)
-- **Cross-platform:** Works on macOS (Homebrew bash) and Linux (bash 5.x)
-- See [docs/BASH-5-UPGRADE.md](../BASH-5-UPGRADE.md) for rationale
+| Module | Purpose |
+|--------|---------|
+| `core.sh` + `api*.sh` | Pluggable validation engine with parallel execution |
+| `validators/core/` | File length, syntax (shellcheck, oxlint, ruff, yamllint, etc.) |
+| `validators/security/` | OpenGrep SAST, sensitive files, Phantom Guard |
+| `validators/gha/` | actionlint, zizmor, octoscan, pinact, poutine |
+| `validators/infra/` | Dockerfile, Terraform, K8s manifest validation |
+| `validators/typescript/` | env-security, framework-config, test-coverage |
 
----
+### Integrations (`lib/integrations/`)
 
-## Performance Metrics
+| Module | Purpose |
+|--------|---------|
+| `1password/` | SSH agent, secrets loading, key sync, diagnostics |
+| `fzf.sh` | Fuzzy finder (fe, fcd, fh, fbr, fkill) |
+| `eza.sh` | Modern ls with git icons |
+| `ripgrep.sh` | Fast search aliases (rgcode, rgtest, rgfunc) |
+| `ghls/` | Git repo list with PR/branch status |
+| `cat.sh` | Enhanced cat (bat → ccat → pygmentize → cat) |
 
-### Current Performance (macOS Apple Silicon)
+### Other
 
-| Component | Time | Optimization Status |
-|-----------|------|---------------------|
-| Full initialization | ~540ms | ⚠️ Needs optimization (target: <200ms) |
-| Git wrapper overhead | ~8ms | ⚠️ Needs optimization (target: <5ms) |
-| Pre-commit hook | ~14ms | ✅ Within target (target: <20ms) |
-| Syntax validation | ~12ms | ✅ Within target (target: <15ms) |
-| RM wrapper overhead | ~1.5ms | ✅ Excellent (target: <2ms) |
-
-### Optimization Strategies
-
-1. **Lazy Loading**
-   - fnm loaded lazily (~25ms savings)
-   - Eza --git conditional
-   - Cached secrets scanning
-
-2. **Fast-Path Execution**
-   - Safe git commands bypass checks
-   - Cached compinit (24h TTL)
-   - Cached validator results
-
-3. **Parallel Execution**
-   - Independent validators run in parallel
-   - File operations batched
-
-4. **Caching**
-   - Secrets cache (300s TTL)
-   - Welcome cache (60s TTL)
-   - Validator results cache
-
----
-
-## Security Considerations
-
-### Threat Model
-
-1. **Accidental Data Loss**
-   - Mitigation: RM protection, trash integration
-   - Layer 1-4 protection
-
-2. **Secret Leakage**
-   - Mitigation: Pre-commit secret scanning
-   - 40+ patterns, false positive handling
-
-3. **Destructive Git Operations**
-   - Mitigation: Git wrapper warnings
-   - Bypass flags with audit logging
-
-4. **Malicious Scripts**
-   - Mitigation: Command safety blocks
-   - npm/npx blocking by default
-
-### Audit Logging
-
-All bypass usage logged to `~/.shell-config-audit.log`:
-- Bypass flags
-- RM operations
-- Safety violations
-- Secret scanning skips
-
-Review: `tail -20 ~/.shell-config-audit.log`
+| Module | Purpose |
+|--------|---------|
+| `aliases/` | 9 alias files (git, AI, GHA, package managers, servers, etc.) |
+| `welcome/` | MOTD: greeting, terminal status grid, git hooks grid, shortcuts |
+| `terminal/` | Terminal installers (Ghostty, iTerm2, Kitty, Warp), autocomplete |
+| `setup/` | Symlink manager for install/uninstall |
 
 ---
 
-## Platform Compatibility
+## Performance (Feb 2026, macOS Apple Silicon)
 
-### macOS (Primary)
+| Metric | Time | Rating |
+|--------|------|--------|
+| Full startup (`zsh -i`) | ~123ms | MID |
+| `source init.sh` only | ~98ms | MID |
+| Minimal init (all features off) | ~42ms | GREAT |
+| Welcome message | ~2ms | GREAT |
+| Git wrapper overhead | ~7ms | GREAT |
+| compinit (cached) | ~11ms | GREAT |
 
-- Bash 5.x via Homebrew required (`brew install bash`)
-- System bash 3.2.57 not supported
-- Homebrew paths auto-detected
-- Python framework detection
-- BSD stat commands
+Per-feature cost (disabled individually from ~98ms baseline):
 
-### Linux (Secondary)
+| Feature Disabled | Init Time | Cost |
+|-----------------|-----------|------|
+| GIT_WRAPPER | ~79ms | ~19ms |
+| LOG_ROTATION | ~85ms | ~13ms |
+| COMMAND_SAFETY | ~103ms | ~(-5ms) |
+| WELCOME | ~107ms | ~(-9ms) |
 
-- Bash 5.x (native)
-- Standard paths
-- GNU stat commands
-- No Homebrew
-
-### Compatibility Notes
-
-- **No Windows support** (never)
-- **Bash 4.0+ minimum** (5.x recommended)
-- Zsh 5.9+ required for interactive shell features
-- Cross-platform stat handling
-- See [BASH-5-UPGRADE.md](../BASH-5-UPGRADE.md) for migration details
+See [tools/benchmarking/](../../tools/benchmarking/) for full reports and `benchmark.sh`.
 
 ---
 
-## Next Steps
+## Security Model
 
-- **[MODULES.md](MODULES.md)** - Detailed module structure
-- **[INITIALIZATION.md](INITIALIZATION.md)** - Startup flow and timing
-- **[INTEGRATIONS.md](INTEGRATIONS.md)** - Integration layer
-- **[API](../api/API-QUICKSTART.md)** - Validator API documentation
+| Threat | Mitigation |
+|--------|-----------|
+| Accidental data loss | 4-layer RM protection, trash integration |
+| Secret leakage | Pre-commit gitleaks scanning (40+ patterns) |
+| Destructive git ops | Git wrapper warnings, bypass flags with audit logging |
+| Dangerous commands | Command safety engine (61 rules), PATH wrappers |
+| Supply chain | Phantom Guard typosquatting, GHA security scanners |
+
+All bypass usage logged to `~/.shell-config-audit.log`.
 
 ---
 
-*For more information, see:*
-- [README.md](../README.md) - User documentation
-- [CLAUDE.md](../CLAUDE.md) - AI development guidelines
+## Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| macOS (Apple Silicon) | Primary | `brew install bash` required |
+| macOS (Intel) | Primary | Homebrew paths auto-detected |
+| Linux (Ubuntu/Debian/Fedora/Arch) | Supported | Native bash 5.x |
+| Windows | Never | No support planned |
+
+See [BASH-5-UPGRADE.md](BASH-5-UPGRADE.md) for rationale.
+
+---
+
+## Related Docs
+
+- **[INITIALIZATION.md](INITIALIZATION.md)** — Startup flow and timing
+- **[GIT-HOOKS-PIPELINE.md](GIT-HOOKS-PIPELINE.md)** — All 7 git hooks in detail
+- **[INTEGRATIONS.md](INTEGRATIONS.md)** — Integration layer and templates
+- **[API Reference](api/API-REFERENCE.md)** — Validator API
+- **[README.md](../../README.md)** — User documentation
