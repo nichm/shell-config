@@ -272,6 +272,7 @@ _sc_log_dry() {
 # EXPORT FUNCTIONS
 # =============================================================================
 if [[ -n "${BASH_VERSION:-}" ]]; then
+    export -f _sc_migrate_gitconfig_identity _sc_log_dry 2>/dev/null || true
     export -f sc_symlink_create sc_symlink_create_all 2>/dev/null || true
     export -f sc_symlink_remove sc_symlink_remove_all 2>/dev/null || true
     export -f sc_check_remaining_artifacts 2>/dev/null || true
