@@ -12,7 +12,7 @@
 [init]
 	defaultBranch = main
 [core]
-	editor = nano
+	editor = true  # no-op: exits 0 immediately; agents never hang on editor prompts
 	hooksPath = ~/.githooks
 	# Custom hooks directory - install.sh ensures hooks are available here
 [pull]
@@ -47,7 +47,8 @@
 # =============================================================================
 # LOCAL OVERRIDES (must be at the end — last value wins in git config)
 # =============================================================================
-# Put your [user] section and credential helpers in config/gitconfig.local
+# Put your [user] section, credential helpers, and editor preference in config/gitconfig.local
+# e.g. to restore a real editor: [core]\n#   editor = vim  # or: code --wait, nano, etc.
 # See config/personal.env.example for setup instructions
 # =============================================================================
 [include]
