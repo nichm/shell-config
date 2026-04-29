@@ -679,6 +679,19 @@ deploy_claude_config() {
     _link_claude_dir "$agents_src" "$agents_dst" "agent"
     _link_claude_dir "$cmds_src"   "$cmds_dst"   "command"
 
+    # Codex CLI: deploy AGENTS.md to ~/.codex/AGENTS.md
+    local codex_src="$SCRIPT_DIR/config/codex/AGENTS.md"
+    local codex_dst="$HOME/.codex/AGENTS.md"
+    if [[ -f "$codex_src" ]]; then
+        mkdir -p "$HOME/.codex"
+        if [[ -L "$codex_dst" && "$(readlink "$codex_dst")" == "$codex_src" ]]; then
+            log_success "~/.codex/AGENTS.md already linked"
+        else
+            [[ -e "$codex_dst" ]] && mv "$codex_dst" "$codex_dst.backup.$(date +%Y%m%d_%H%M%S)"
+            ln -s "$codex_src" "$codex_dst" && log_success "Linked ~/.codex/AGENTS.md"
+        fi
+    fi
+
     echo ""
     echo "  💡 Run /setup-claude-md in Claude Code to add tool preferences to ~/.claude/CLAUDE.md"
 }
