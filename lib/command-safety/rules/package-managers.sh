@@ -1,50 +1,71 @@
 #!/usr/bin/env bash
 # =============================================================================
-# ⚠️ PACKAGE MANAGER RULES
+# package-managers.sh - Package manager safety rules
 # =============================================================================
 # Safety rules for package managers: npm/yarn/pnpm (blocked — use bun),
 # pip/pip3/python/python3 (ALL blocked — use uv), brew, composer, go, cargo, bun.
 # Special matching:
 #   BREW_UNINSTALL - exempt="--zap" (so it doesn't trigger when --zap variant should)
+#
+# Disable all rules in this file:
+#   export COMMAND_SAFETY_DISABLE_PACKAGE_MANAGERS=true
+#
+# Allow individual managers (overrides block for that tool only):
+#   export COMMAND_SAFETY_ALLOW_NPM=true    # unblock npm
+#   export COMMAND_SAFETY_ALLOW_NPX=true    # unblock npx
+#   export COMMAND_SAFETY_ALLOW_YARN=true   # unblock yarn
+#   export COMMAND_SAFETY_ALLOW_PNPM=true   # unblock pnpm
+#   export COMMAND_SAFETY_ALLOW_PIP=true    # unblock pip/pip3 (python/python3 still blocked)
+#   export COMMAND_SAFETY_ALLOW_PYTHON=true # unblock python/python3 direct invocation
+#
+# Set allow flags before shell-config is sourced, e.g. in ~/.zshrc.local.
 # =============================================================================
 
 # shellcheck disable=SC2034
 
 # --- npm (blocked — use bun) ---
-_rule NPM cmd="npm" \
-    block="Use bun instead — this project uses bun exclusively" \
-    bypass="--force-npm" docs="https://bun.sh/docs"
+if [[ "${COMMAND_SAFETY_ALLOW_NPM:-}" != "true" ]]; then
+    _rule NPM cmd="npm" \
+        block="Use bun instead — this project uses bun exclusively" \
+        bypass="--force-npm" docs="https://bun.sh/docs"
 
-_fix NPM \
-    "bun install     # Instead of: npm install" \
-    "bun add <pkg>   # Instead of: npm install <pkg>" \
-    "bunx <cmd>      # Instead of: npx <cmd>"
+    _fix NPM \
+        "bun install     # Instead of: npm install" \
+        "bun add <pkg>   # Instead of: npm install <pkg>" \
+        "bunx <cmd>      # Instead of: npx <cmd>"
+fi
 
 # --- npx (blocked — use bunx) ---
-_rule NPX cmd="npx" \
-    block="Use bunx instead of npx" \
-    fix="bunx <package>" \
-    bypass="--force-npx" docs="https://bun.sh/docs"
+if [[ "${COMMAND_SAFETY_ALLOW_NPX:-}" != "true" ]]; then
+    _rule NPX cmd="npx" \
+        block="Use bunx instead of npx" \
+        fix="bunx <package>" \
+        bypass="--force-npx" docs="https://bun.sh/docs"
+fi
 
 # --- yarn (blocked — use bun) ---
-_rule YARN cmd="yarn" \
-    block="Use bun instead of yarn" \
-    bypass="--force-yarn" docs="https://bun.sh/docs"
+if [[ "${COMMAND_SAFETY_ALLOW_YARN:-}" != "true" ]]; then
+    _rule YARN cmd="yarn" \
+        block="Use bun instead of yarn" \
+        bypass="--force-yarn" docs="https://bun.sh/docs"
 
-_fix YARN \
-    "bun install       # Instead of: yarn install" \
-    "bun add <pkg>     # Instead of: yarn add <pkg>" \
-    "bun run <script>  # Instead of: yarn run <script>"
+    _fix YARN \
+        "bun install       # Instead of: yarn install" \
+        "bun add <pkg>     # Instead of: yarn add <pkg>" \
+        "bun run <script>  # Instead of: yarn run <script>"
+fi
 
 # --- pnpm (blocked — use bun) ---
-_rule PNPM cmd="pnpm" \
-    block="Use bun instead of pnpm" \
-    bypass="--force-pnpm"
+if [[ "${COMMAND_SAFETY_ALLOW_PNPM:-}" != "true" ]]; then
+    _rule PNPM cmd="pnpm" \
+        block="Use bun instead of pnpm" \
+        bypass="--force-pnpm"
 
-_fix PNPM \
-    "bun install   # Instead of: pnpm install" \
-    "bun add <pkg> # Instead of: pnpm add <pkg>" \
-    "bunx <pkg>    # Instead of: pnpm dlx <pkg>"
+    _fix PNPM \
+        "bun install   # Instead of: pnpm install" \
+        "bun add <pkg> # Instead of: pnpm add <pkg>" \
+        "bunx <pkg>    # Instead of: pnpm dlx <pkg>"
+fi
 
 # =============================================================================
 # 🐍 UV ENFORCEMENT: pip/pip3/python/python3 → uv
@@ -55,69 +76,73 @@ _fix PNPM \
 # so users get the most helpful message for pip-specific commands.
 # =============================================================================
 
-# --- pip (blocked — use uv) ---
-_rule PIP cmd="pip" \
-    block="Use uv instead of pip — 10-100x faster with automatic venv management" \
-    bypass="--force-pip" docs="https://docs.astral.sh/uv/"
+# --- pip/pip3 and python -m pip (blocked — use uv) ---
+if [[ "${COMMAND_SAFETY_ALLOW_PIP:-}" != "true" ]]; then
 
-_fix PIP \
-    "uv pip install <package>  # Drop-in pip replacement (10-100x faster)" \
-    "uv add <package>          # Add to project dependencies (pyproject.toml)" \
-    "uvx <command>             # Run CLI tools without installing (like pipx)"
+    _rule PIP cmd="pip" \
+        block="Use uv instead of pip — 10-100x faster with automatic venv management" \
+        bypass="--force-pip" docs="https://docs.astral.sh/uv/"
 
-# --- pip3 (blocked — use uv) ---
-_rule PIP3 cmd="pip3" \
-    block="Use uv instead of pip3 — uv handles Python 3 automatically" \
-    bypass="--force-pip3" docs="https://docs.astral.sh/uv/"
+    _fix PIP \
+        "uv pip install <package>  # Drop-in pip replacement (10-100x faster)" \
+        "uv add <package>          # Add to project dependencies (pyproject.toml)" \
+        "uvx <command>             # Run CLI tools without installing (like pipx)"
 
-_fix PIP3 \
-    "uv pip install <package>  # uv selects correct Python version automatically" \
-    "uv add <package>          # Add to project dependencies (pyproject.toml)" \
-    "uvx <command>             # Run CLI tools without installing"
+    _rule PIP3 cmd="pip3" \
+        block="Use uv instead of pip3 — uv handles Python 3 automatically" \
+        bypass="--force-pip3" docs="https://docs.astral.sh/uv/"
 
-# --- python -m pip (blocked — use uv, MUST be before PYTHON catch-all) ---
-# Uses same bypass as catch-all so --force-python skips ALL python rules
-_rule PYTHON_M_PIP cmd="python" match="-m pip" \
-    block="Use uv instead of python -m pip — faster and manages venvs automatically" \
-    bypass="--force-python" docs="https://docs.astral.sh/uv/"
+    _fix PIP3 \
+        "uv pip install <package>  # uv selects correct Python version automatically" \
+        "uv add <package>          # Add to project dependencies (pyproject.toml)" \
+        "uvx <command>             # Run CLI tools without installing"
 
-_fix PYTHON_M_PIP \
-    "uv pip install <package>  # Drop-in replacement for python -m pip install" \
-    "uv add <package>          # Add to project dependencies"
+    # python -m pip / python3 -m pip — MUST precede catch-all python rules
+    # Uses same bypass as catch-all so --force-python skips ALL python rules
+    _rule PYTHON_M_PIP cmd="python" match="-m pip" \
+        block="Use uv instead of python -m pip — faster and manages venvs automatically" \
+        bypass="--force-python" docs="https://docs.astral.sh/uv/"
 
-# --- python3 -m pip (blocked — use uv, MUST be before PYTHON3 catch-all) ---
-# Uses same bypass as catch-all so --force-python3 skips ALL python3 rules
-_rule PYTHON3_M_PIP cmd="python3" match="-m pip" \
-    block="Use uv instead of python3 -m pip — faster and manages venvs automatically" \
-    bypass="--force-python3" docs="https://docs.astral.sh/uv/"
+    _fix PYTHON_M_PIP \
+        "uv pip install <package>  # Drop-in replacement for python -m pip install" \
+        "uv add <package>          # Add to project dependencies"
 
-_fix PYTHON3_M_PIP \
-    "uv pip install <package>  # Drop-in replacement for python3 -m pip install" \
-    "uv add <package>          # Add to project dependencies"
+    _rule PYTHON3_M_PIP cmd="python3" match="-m pip" \
+        block="Use uv instead of python3 -m pip — faster and manages venvs automatically" \
+        bypass="--force-python3" docs="https://docs.astral.sh/uv/"
 
-# --- python (catch-all — use uv run) ---
-# Catches: python script.py, python -c "code", python -m module, piped python
-_rule PYTHON_DIRECT cmd="python" \
-    block="Use uv run instead of python — uv manages Python versions and venvs automatically" \
-    bypass="--force-python" docs="https://docs.astral.sh/uv/guides/scripts/"
+    _fix PYTHON3_M_PIP \
+        "uv pip install <package>  # Drop-in replacement for python3 -m pip install" \
+        "uv add <package>          # Add to project dependencies"
 
-_fix PYTHON_DIRECT \
-    "uv run script.py              # Run script with managed Python + dependencies" \
-    "uv run python -c 'code'       # Run inline code with managed Python" \
-    "uv run python -m module       # Run module (venv, http.server, etc.)" \
-    "... | uv run python -c 'code' # Pipe data through managed Python"
+fi
 
-# --- python3 (catch-all — use uv run) ---
-# Catches: python3 script.py, python3 -c "code", python3 -m module, piped python3
-_rule PYTHON3_DIRECT cmd="python3" \
-    block="Use uv run instead of python3 — uv manages Python versions and venvs automatically" \
-    bypass="--force-python3" docs="https://docs.astral.sh/uv/guides/scripts/"
+# --- python/python3 direct invocation (blocked — use uv run) ---
+if [[ "${COMMAND_SAFETY_ALLOW_PYTHON:-}" != "true" ]]; then
 
-_fix PYTHON3_DIRECT \
-    "uv run script.py              # Run script with managed Python + dependencies" \
-    "uv run python -c 'code'       # Run inline code with managed Python" \
-    "uv run python -m module       # Run module (venv, http.server, etc.)" \
-    "... | uv run python -c 'code' # Pipe data through managed Python"
+    # Catches: python script.py, python -c "code", python -m module, piped python
+    _rule PYTHON_DIRECT cmd="python" \
+        block="Use uv run instead of python — uv manages Python versions and venvs automatically" \
+        bypass="--force-python" docs="https://docs.astral.sh/uv/guides/scripts/"
+
+    _fix PYTHON_DIRECT \
+        "uv run script.py              # Run script with managed Python + dependencies" \
+        "uv run python -c 'code'       # Run inline code with managed Python" \
+        "uv run python -m module       # Run module (venv, http.server, etc.)" \
+        "... | uv run python -c 'code' # Pipe data through managed Python"
+
+    # Catches: python3 script.py, python3 -c "code", python3 -m module, piped python3
+    _rule PYTHON3_DIRECT cmd="python3" \
+        block="Use uv run instead of python3 — uv manages Python versions and venvs automatically" \
+        bypass="--force-python3" docs="https://docs.astral.sh/uv/guides/scripts/"
+
+    _fix PYTHON3_DIRECT \
+        "uv run script.py              # Run script with managed Python + dependencies" \
+        "uv run python -c 'code'       # Run inline code with managed Python" \
+        "uv run python -m module       # Run module (venv, http.server, etc.)" \
+        "... | uv run python -c 'code' # Pipe data through managed Python"
+
+fi
 
 # --- composer (blocked — use bun) ---
 _rule COMPOSER_BLOCK cmd="composer" \
