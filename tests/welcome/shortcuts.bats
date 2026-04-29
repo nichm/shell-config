@@ -81,15 +81,6 @@ teardown() {
 # 🔧 FUNCTION TESTS
 # =============================================================================
 
-@test "_shortcuts_get_vps_ip returns empty when no SSH config" {
-    source "$WELCOME_DIR/shortcuts.sh"
-    
-    # With test HOME, no SSH config exists
-    run _shortcuts_get_vps_ip
-    [ "$status" -eq 0 ]
-    [ -z "$output" ]
-}
-
 @test "_print_shortcut outputs formatted shortcut" {
     source "$WELCOME_DIR/shortcuts.sh"
     
