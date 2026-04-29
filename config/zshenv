@@ -4,6 +4,9 @@
 # Environment variables for all zsh sessions (loaded before .zshrc)
 # =============================================================================
 
+# 1Password SSH agent — set to "true" to enable, "false" to disable, "auto" to silently skip
+# export SHELL_CONFIG_1PASSWORD_SSH=auto
+
 # Cargo (Rust) - only if installed
 [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
 
