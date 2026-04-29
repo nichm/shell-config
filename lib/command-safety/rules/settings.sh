@@ -23,6 +23,13 @@
 #   COMMAND_SAFETY_DISABLE_NEXTJS             - Next.js rules
 #   COMMAND_SAFETY_DISABLE_PACKAGE_MANAGERS   - Package manager rules
 #   COMMAND_SAFETY_DISABLE_DANGEROUS_COMMANDS - Generic dangerous commands
+# Per-manager allow flags (fine-grained; set before shell-config is sourced):
+#   COMMAND_SAFETY_ALLOW_NPM=true    - Allow npm (yarn/pnpm still blocked)
+#   COMMAND_SAFETY_ALLOW_NPX=true    - Allow npx
+#   COMMAND_SAFETY_ALLOW_YARN=true   - Allow yarn
+#   COMMAND_SAFETY_ALLOW_PNPM=true   - Allow pnpm
+#   COMMAND_SAFETY_ALLOW_PIP=true    - Allow pip/pip3 (python/python3 still blocked)
+#   COMMAND_SAFETY_ALLOW_PYTHON=true - Allow python/python3 direct invocation
 # Example:
 #   # In ~/.bashrc or ~/.zshrc, before sourcing shell-config:
 #   export COMMAND_SAFETY_DISABLE_NGINX=true      # Don't use nginx
