@@ -234,7 +234,6 @@ install_deps() {
 
             # difftastic: brew pkg is 'difftastic', binary is 'difft'
             _sc_brew "difft" "difftastic"
-
             # Opengrep: no brew; self-contained binary via official script (github.com/opengrep/opengrep)
             if ! command_exists "opengrep"; then
                 log_info "Installing opengrep..."
