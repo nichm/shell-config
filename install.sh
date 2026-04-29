@@ -148,20 +148,54 @@ install_deps() {
                 }
             done
 
-            # Optional tools (soft-fail OK)
-            command_exists "eza" && log_success "eza installed" || {
-                log_info "Installing eza..."
-                brew install eza 2>/dev/null || log_warning "eza failed - falling back to standard tools"
-            }
+            # Optional brew tools — soft-fail each
+            for _bt in eza fzf broot ccat hadolint sqruff zizmor pinact poutine trash \
+                       zsh-autosuggestions zsh-syntax-highlighting; do
+                [[ "$_bt" == "zsh-autosuggestions" ]] && [[ -d /opt/homebrew/share/zsh-autosuggestions ]] && { log_success "$_bt installed"; continue; }
+                [[ "$_bt" == "zsh-syntax-highlighting" ]] && [[ -d /opt/homebrew/share/zsh-syntax-highlighting ]] && { log_success "$_bt installed"; continue; }
+                command_exists "$_bt" && log_success "$_bt installed" || {
+                    log_info "Installing $_bt..."; brew install "$_bt" 2>/dev/null || log_warning "$_bt failed"
+                }
+            done; unset _bt
+            # Opengrep: no brew; self-contained binary via official script (github.com/opengrep/opengrep)
+            if ! command_exists "opengrep"; then
+                log_info "Installing opengrep..."
+                local _og_script; _og_script=$(mktemp) && \
+                    curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh -o "$_og_script" 2>/dev/null && \
+                    bash "$_og_script" 2>/dev/null && log_success "opengrep installed" || log_warning "opengrep failed"
+                rm -f "$_og_script"
+            else
+                log_success "opengrep installed"
+            fi
+            # Octoscan: no brew, no macOS binary; go install fails (replace directives) — clone+build
+            if ! command_exists "octoscan"; then
+                if command_exists "go"; then
+                    log_info "Installing octoscan (go build from source)..."
+                    local _oct_tmp; _oct_tmp=$(mktemp -d)
+                    git clone -q --depth 1 https://github.com/synacktiv/octoscan.git "$_oct_tmp" 2>/dev/null && \
+                        (cd "$_oct_tmp" && go build -o octoscan . 2>/dev/null) && \
+                        { mkdir -p "$HOME/.local/bin" && mv "$_oct_tmp/octoscan" "$HOME/.local/bin/octoscan" && log_success "octoscan installed"; } || \
+                        log_warning "octoscan: build failed"
+                    /bin/rm -rf "$_oct_tmp"
+                else
+                    log_warning "octoscan: needs Go — brew install go, then re-run install.sh"
+                fi
+            else
+                log_success "octoscan installed"
+            fi
+            # InShellisense: terminal autocomplete (github.com/microsoft/inshellisense)
+            if ! command_exists "is" && [[ ! -x "$HOME/.bun/bin/is" ]]; then
+                command_exists "bun" && \
+                    { log_info "Installing inshellisense..."; bun install @microsoft/inshellisense -g 2>/dev/null && log_success "inshellisense installed" || log_warning "inshellisense failed"; } || \
+                    log_warning "inshellisense: needs bun"
+            else
+                log_success "inshellisense installed"
+            fi
 
             # Optional tools
             command_exists "oxlint" || {
                 log_info "Installing oxlint..."
                 brew install oxlint 2>/dev/null || { command_exists "cargo" && cargo install oxlint 2>/dev/null; } || log_warning "oxlint failed"
-            }
-            command_exists "trash" && log_success "trash installed" || {
-                log_info "Installing trash..."
-                brew install trash 2>/dev/null && log_success "trash installed" || log_warning "trash failed"
             }
             command_exists "wrangler" && log_success "wrangler installed" || {
                 log_info "Installing wrangler..."
