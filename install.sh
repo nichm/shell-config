@@ -5,9 +5,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 trap ':' EXIT INT TERM
+# shellcheck source=lib/core/colors.sh
 source "$SCRIPT_DIR/lib/core/colors.sh"
+# shellcheck source=lib/core/platform.sh
 source "$SCRIPT_DIR/lib/core/platform.sh"
+# shellcheck source=lib/core/command-cache.sh
 source "$SCRIPT_DIR/lib/core/command-cache.sh"
+# shellcheck source=lib/setup/symlink-manager.sh
 source "$SCRIPT_DIR/lib/setup/symlink-manager.sh"
 
 # =============================================================================
@@ -47,6 +51,73 @@ done
 # create_symlink and symlink_one are now provided by lib/setup/symlink-manager.sh
 # (sc_symlink_create, sc_symlink_create_all)
 
+# =============================================================================
+# INSTALL HELPERS
+# =============================================================================
+
+# Install a brew package, soft-fail. Binary name may differ from package name.
+# Usage: _sc_brew BINARY [PACKAGE]
+_sc_brew() {
+    local binary="${1}" pkg="${2:-${1}}"
+    if command_exists "${binary}"; then
+        log_success "${binary} installed"
+        return 0
+    fi
+    log_info "Installing ${pkg}..."
+    brew install "${pkg}" 2>/dev/null || log_warning "${pkg} failed"
+}
+
+# Install an npm/bun global package, soft-fail.
+# Usage: _sc_npm BINARY [PACKAGE]
+_sc_npm() {
+    local binary="${1}" pkg="${2:-${1}}"
+    if command_exists "${binary}"; then
+        log_success "${binary} installed"
+        return 0
+    fi
+    log_info "Installing ${pkg}..."
+    if command_exists "bun"; then
+        bun add -g "${pkg}" 2>/dev/null || log_warning "${pkg} failed"
+    else
+        npm install -g "${pkg}" 2>/dev/null || log_warning "${pkg} failed"
+    fi
+}
+
+# Install a cargo package, soft-fail.
+# Usage: _sc_cargo BINARY [PACKAGE] [EXTRA_FLAGS]
+_sc_cargo() {
+    local binary="${1}" pkg="${2:-${1}}" flags="${3:-}"
+    if command_exists "${binary}"; then
+        log_success "${binary} installed"
+        return 0
+    fi
+    if ! command_exists "cargo"; then
+        log_warning "${binary} not installed (requires cargo)"
+        return 0
+    fi
+    log_info "Installing ${pkg}..."
+    # shellcheck disable=SC2086
+    cargo install "${pkg}" ${flags} 2>/dev/null || log_warning "${pkg} failed"
+}
+
+# Install a Python tool via uv (preferred) or pip3 fallback, soft-fail.
+# Usage: _sc_uv BINARY [PACKAGE]
+_sc_uv() {
+    local binary="${1}" pkg="${2:-${1}}"
+    if command_exists "${binary}"; then
+        log_success "${binary} installed"
+        return 0
+    fi
+    log_info "Installing ${pkg}..."
+    if command_exists "uv"; then
+        uv tool install "${pkg}" 2>/dev/null || log_warning "${pkg} failed"
+    elif command_exists "pip3"; then
+        pip3 install "${pkg}" 2>/dev/null || log_warning "${pkg} failed (requires uv or pip3)"
+    else
+        log_warning "${pkg} not installed (requires uv or pip3)"
+    fi
+}
+
 install_deps() {
     [[ "$SC_SKIP_DEPS" == true ]] && {
         log_warning "Skipping dependencies (--skip-deps)"
@@ -67,7 +138,6 @@ install_deps() {
             log_warning "Failed to download UV installer - Python tooling will be limited"
             rm -f "$tmp_script"
         else
-            # Capture errors for better debugging
             local uv_output
             if ! uv_output=$(sh "$tmp_script" 2>&1); then
                 log_warning "UV installation failed: ${uv_output:-No error output}"
@@ -84,7 +154,6 @@ install_deps() {
     case "$SC_PKG_MANAGER" in
         brew)
             log_info "Using Homebrew package manager"
-            # Check if brew is available
             command_exists "brew" || {
                 log_error "Homebrew not found"
                 return 1
@@ -93,12 +162,13 @@ install_deps() {
             # Critical development tools (must succeed)
             # Note: bats-core package installs 'bats' binary, coreutils installs 'greadlink'/'grealpath'
             for pkg in coreutils shellcheck gitleaks bats; do
-                # Map binary name to package name for brew
                 local pkg_name="$pkg"
                 local binary_name="$pkg"
                 [[ "$pkg" == "bats" ]] && pkg_name="bats-core"
                 [[ "$pkg" == "coreutils" ]] && binary_name="greadlink"
-                command_exists "$binary_name" && log_success "$pkg installed" || {
+                if command_exists "$binary_name"; then
+                    log_success "$pkg installed"
+                else
                     log_info "Installing $pkg_name..."
                     if ! brew install "$pkg_name" >/dev/null 2>&1; then
                         case "$pkg" in
@@ -128,70 +198,75 @@ install_deps() {
                                 ;;
                         esac
                     fi
-                }
+                fi
             done
 
             # Semi-critical tools (warn but continue)
             for pkg in yamllint ruff; do
-                command_exists "$pkg" && log_success "$pkg installed" || {
+                if command_exists "$pkg"; then
+                    log_success "$pkg installed"
+                else
                     log_info "Installing $pkg..."
                     if ! brew install "$pkg" >/dev/null 2>&1; then
                         case "$pkg" in
-                            yamllint)
-                                log_warning "yamllint installation failed - YAML validation will be skipped"
-                                ;;
-                            ruff)
-                                log_warning "ruff installation failed - Python linting will use fallback"
-                                ;;
+                            yamllint) log_warning "yamllint installation failed - YAML validation will be skipped" ;;
+                            ruff)     log_warning "ruff installation failed - Python linting will use fallback" ;;
                         esac
                     fi
-                }
+                fi
             done
 
             # Optional brew tools — soft-fail each
             for _bt in eza fzf broot ccat hadolint sqruff zizmor pinact poutine trash \
+                       ast-grep fd sd bat scc jq yq watchexec \
                        zsh-autosuggestions zsh-syntax-highlighting; do
-                [[ "$_bt" == "zsh-autosuggestions" ]] && [[ -d /opt/homebrew/share/zsh-autosuggestions ]] && { log_success "$_bt installed"; continue; }
-                [[ "$_bt" == "zsh-syntax-highlighting" ]] && [[ -d /opt/homebrew/share/zsh-syntax-highlighting ]] && { log_success "$_bt installed"; continue; }
-                command_exists "$_bt" && log_success "$_bt installed" || {
-                    log_info "Installing $_bt..."; brew install "$_bt" 2>/dev/null || log_warning "$_bt failed"
-                }
-            done; unset _bt
-            # AI/agent workflow tools — improve Claude Code and coding agent efficiency
-            for _bt in ast-grep fd sd bat scc jq yq watchexec; do
-                command_exists "$_bt" && log_success "$_bt installed" || {
-                    log_info "Installing $_bt..."; brew install "$_bt" 2>/dev/null || log_warning "$_bt failed"
-                }
-            done; unset _bt
-            command_exists "difft" && log_success "difftastic installed" || { log_info "Installing difftastic..."; brew install difftastic 2>/dev/null || log_warning "difftastic failed"; }
-            for _npm in jscpd ccusage; do
-                command_exists "$_npm" && log_success "$_npm installed" || {
-                    log_info "Installing $_npm..."; command_exists "bun" && bun add -g "$_npm" 2>/dev/null || npm install -g "$_npm" 2>/dev/null || log_warning "$_npm failed"
-                }
-            done; unset _npm
-            command_exists "depcruise" && log_success "dependency-cruiser installed" || {
-                log_info "Installing dependency-cruiser..."
-                command_exists "bun" && bun add -g dependency-cruiser 2>/dev/null || npm install -g dependency-cruiser 2>/dev/null || log_warning "dependency-cruiser failed"
-            }
+                if [[ "$_bt" == "zsh-autosuggestions" ]] && [[ -d /opt/homebrew/share/zsh-autosuggestions ]]; then
+                    log_success "$_bt installed"
+                    continue
+                fi
+                if [[ "$_bt" == "zsh-syntax-highlighting" ]] && [[ -d /opt/homebrew/share/zsh-syntax-highlighting ]]; then
+                    log_success "$_bt installed"
+                    continue
+                fi
+                _sc_brew "$_bt"
+            done
+            unset _bt
+
+            # difftastic: brew pkg is 'difftastic', binary is 'difft'
+            _sc_brew "difft" "difftastic"
             # Opengrep: no brew; self-contained binary via official script (github.com/opengrep/opengrep)
             if ! command_exists "opengrep"; then
                 log_info "Installing opengrep..."
-                local _og_script; _og_script=$(mktemp) && \
-                    curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh -o "$_og_script" 2>/dev/null && \
-                    bash "$_og_script" 2>/dev/null && log_success "opengrep installed" || log_warning "opengrep failed"
+                local _og_script
+                _og_script=$(mktemp)
+                if curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh -o "$_og_script" 2>/dev/null; then
+                    if bash "$_og_script" 2>/dev/null; then
+                        log_success "opengrep installed"
+                    else
+                        log_warning "opengrep failed"
+                    fi
+                else
+                    log_warning "opengrep failed (download error)"
+                fi
                 rm -f "$_og_script"
             else
                 log_success "opengrep installed"
             fi
+
             # Octoscan: no brew, no macOS binary; go install fails (replace directives) — clone+build
             if ! command_exists "octoscan"; then
                 if command_exists "go"; then
                     log_info "Installing octoscan (go build from source)..."
-                    local _oct_tmp; _oct_tmp=$(mktemp -d)
-                    git clone -q --depth 1 https://github.com/synacktiv/octoscan.git "$_oct_tmp" 2>/dev/null && \
-                        (cd "$_oct_tmp" && go build -o octoscan . 2>/dev/null) && \
-                        { mkdir -p "$HOME/.local/bin" && mv "$_oct_tmp/octoscan" "$HOME/.local/bin/octoscan" && log_success "octoscan installed"; } || \
+                    local _oct_tmp
+                    _oct_tmp=$(mktemp -d)
+                    if git clone -q --depth 1 https://github.com/synacktiv/octoscan.git "$_oct_tmp" 2>/dev/null &&
+                        (cd "$_oct_tmp" && go build -o octoscan . 2>/dev/null); then
+                        mkdir -p "$HOME/.local/bin"
+                        mv "$_oct_tmp/octoscan" "$HOME/.local/bin/octoscan"
+                        log_success "octoscan installed"
+                    else
                         log_warning "octoscan: build failed"
+                    fi
                     /bin/rm -rf "$_oct_tmp"
                 else
                     log_warning "octoscan: needs Go — brew install go, then re-run install.sh"
@@ -199,29 +274,52 @@ install_deps() {
             else
                 log_success "octoscan installed"
             fi
+
             # InShellisense: terminal autocomplete (github.com/microsoft/inshellisense)
             if ! command_exists "is" && [[ ! -x "$HOME/.bun/bin/is" ]]; then
-                command_exists "bun" && \
-                    { log_info "Installing inshellisense..."; bun install @microsoft/inshellisense -g 2>/dev/null && log_success "inshellisense installed" || log_warning "inshellisense failed"; } || \
+                if command_exists "bun"; then
+                    log_info "Installing inshellisense..."
+                    if bun install @microsoft/inshellisense -g 2>/dev/null; then
+                        log_success "inshellisense installed"
+                    else
+                        log_warning "inshellisense failed"
+                    fi
+                else
                     log_warning "inshellisense: needs bun"
+                fi
             else
                 log_success "inshellisense installed"
             fi
 
-            # Optional tools
-            command_exists "oxlint" || {
+            # oxlint: brew preferred, cargo fallback
+            if ! command_exists "oxlint"; then
                 log_info "Installing oxlint..."
-                brew install oxlint 2>/dev/null || { command_exists "cargo" && cargo install oxlint 2>/dev/null; } || log_warning "oxlint failed"
-            }
-            command_exists "wrangler" && log_success "wrangler installed" || {
-                log_info "Installing wrangler..."
-                command_exists "bun" && bun add -g wrangler 2>/dev/null || npm install -g wrangler 2>/dev/null || log_warning "wrangler failed"
-            }
-            command_exists "supabase" && log_success "supabase installed" || {
+                if ! brew install oxlint 2>/dev/null; then
+                    if command_exists "cargo"; then
+                        cargo install oxlint 2>/dev/null || log_warning "oxlint failed"
+                    else
+                        log_warning "oxlint failed (requires brew or cargo)"
+                    fi
+                fi
+            fi
+
+            # npm/bun global tools
+            _sc_npm "wrangler"
+            # AI-dev npm tools
+            _sc_npm "jscpd"
+            _sc_npm "depcruise" "dependency-cruiser"
+            _sc_npm "ccusage"
+
+            # Supabase CLI
+            if ! command_exists "supabase"; then
                 log_info "Installing supabase..."
                 brew install supabase/tap/supabase 2>/dev/null || log_warning "supabase failed"
-            }
-            command_exists "claude" && log_success "claude installed" || {
+            else
+                log_success "supabase installed"
+            fi
+
+            # Claude Code
+            if ! command_exists "claude"; then
                 log_info "Installing claude..."
                 if command_exists "bun"; then
                     bun add -g @anthropic-ai/claude-code 2>/dev/null || log_warning "claude install via bun failed"
@@ -238,51 +336,71 @@ install_deps() {
                             sh "$claude_script" 2>/dev/null || log_warning "claude failed"
                         fi
                         rm -f "$claude_script"
-                        trap - EXIT INT TERM
+                        trap ':' EXIT INT TERM
                     fi
                 fi
-            }
-            command_exists "codex" && log_success "codex installed" || {
+            else
+                log_success "claude installed"
+            fi
+
+            # Codex CLI
+            if ! command_exists "codex"; then
                 log_info "Installing codex..."
-                command_exists "bun" && bun add -g @openai/codex 2>/dev/null || log_warning "codex failed"
-            }
+                if command_exists "bun"; then
+                    bun add -g @openai/codex 2>/dev/null || log_warning "codex failed"
+                else
+                    log_warning "codex failed (requires bun)"
+                fi
+            else
+                log_success "codex installed"
+            fi
             ;;
 
         apt)
             log_info "Using apt package manager (Ubuntu/Debian)"
-            # Update package list
             sudo apt-get update -qq || {
                 log_error "apt-get update failed"
                 return 1
             }
 
             # Core tools available via apt
-            local apt_packages=("shellcheck" "yamllint" "ripgrep" "fzf" "bat" "jq")
+            local apt_packages=("shellcheck" "yamllint" "ripgrep" "fzf" "bat" "jq" "fd-find" "watchexec")
             for pkg in "${apt_packages[@]}"; do
-                command_exists "$pkg" && log_success "$pkg installed" || {
+                if command_exists "$pkg"; then
+                    log_success "$pkg installed"
+                else
                     log_info "Installing $pkg..."
                     sudo apt-get install -y "$pkg" 2>/dev/null || log_warning "Failed: $pkg"
-                }
+                fi
             done
 
-            # eza is usually available as eza or requires cargo
-            command_exists "eza" || {
+            # eza: apt or cargo fallback
+            if ! command_exists "eza"; then
                 log_info "Installing eza..."
-                sudo apt-get install -y eza 2>/dev/null || cargo install eza 2>/dev/null || log_warning "eza failed"
-            }
+                sudo apt-get install -y eza 2>/dev/null || _sc_cargo "eza"
+            fi
+
+            # AI-dev tools via cargo (not in apt)
+            _sc_cargo "ast-grep" "ast-grep" "--locked"
+            _sc_cargo "sd"
+            _sc_cargo "scc"
+            _sc_cargo "difft" "difftastic"
+            _sc_uv "yq"
 
             # trash-cli (Linux equivalent of macOS trash)
-            command_exists "trash" || {
+            if ! command_exists "trash"; then
                 log_info "Installing trash-cli..."
                 sudo apt-get install -y trash-cli 2>/dev/null || log_warning "trash-cli failed"
-            }
+            fi
 
-            # Node.js tools via bun
-            command_exists "wrangler" || {
-                log_info "Installing wrangler..."
-                command_exists "bun" && bun add -g wrangler 2>/dev/null || npm install -g wrangler 2>/dev/null || log_warning "wrangler failed"
-            }
-            command_exists "claude" || {
+            # npm/bun global tools
+            _sc_npm "wrangler"
+            _sc_npm "jscpd"
+            _sc_npm "depcruise" "dependency-cruiser"
+            _sc_npm "ccusage"
+
+            # Claude Code
+            if ! command_exists "claude"; then
                 log_info "Installing claude..."
                 if command_exists "bun"; then
                     bun add -g @anthropic-ai/claude-code 2>/dev/null || log_warning "claude failed"
@@ -305,44 +423,43 @@ install_deps() {
                         trap ':' EXIT INT TERM
                     fi
                 fi
-            }
-            # AI/agent workflow tools (npm — cross-platform)
-            for _npm in jscpd ccusage; do
-                command_exists "$_npm" && log_success "$_npm installed" || {
-                    log_info "Installing $_npm..."; command_exists "bun" && bun add -g "$_npm" 2>/dev/null || npm install -g "$_npm" 2>/dev/null || log_warning "$_npm failed"
-                }
-            done; unset _npm
-            command_exists "depcruise" && log_success "dependency-cruiser installed" || {
-                log_info "Installing dependency-cruiser..."
-                command_exists "bun" && bun add -g dependency-cruiser 2>/dev/null || npm install -g dependency-cruiser 2>/dev/null || log_warning "dependency-cruiser failed"
-            }
+            fi
             ;;
 
         dnf | yum)
             log_info "Using $SC_PKG_MANAGER package manager (Fedora/RHEL)"
-            local rpm_packages=("shellcheck" "ripgrep" "fzf" "bat")
+            local rpm_packages=("shellcheck" "ripgrep" "fzf" "bat" "jq" "fd-find" "watchexec")
             for pkg in "${rpm_packages[@]}"; do
-                command_exists "$pkg" && log_success "$pkg installed" || {
+                if command_exists "$pkg"; then
+                    log_success "$pkg installed"
+                else
                     log_info "Installing $pkg..."
                     sudo "$SC_PKG_MANAGER" install -y "$pkg" 2>/dev/null || log_warning "Failed: $pkg"
-                }
+                fi
             done
 
             # trash-cli
-            command_exists "trash" || {
+            if ! command_exists "trash"; then
                 log_info "Installing trash-cli..."
                 sudo "$SC_PKG_MANAGER" install -y trash-cli 2>/dev/null || log_warning "trash-cli failed"
-            }
+            fi
 
-            # Install additional tools via cargo if available
-            command_exists "eza" || { command_exists "cargo" && cargo install eza 2>/dev/null || log_warning "eza failed (requires cargo)"; }
+            # Tools via cargo
+            _sc_cargo "eza"
+            _sc_cargo "ast-grep" "ast-grep" "--locked"
+            _sc_cargo "sd"
+            _sc_cargo "scc"
+            _sc_cargo "difft" "difftastic"
+            _sc_uv "yq"
 
-            # Node.js tools via bun
-            command_exists "wrangler" || {
-                log_info "Installing wrangler..."
-                command_exists "bun" && bun add -g wrangler 2>/dev/null || npm install -g wrangler 2>/dev/null || log_warning "wrangler failed"
-            }
-            command_exists "claude" || {
+            # npm/bun global tools
+            _sc_npm "wrangler"
+            _sc_npm "jscpd"
+            _sc_npm "depcruise" "dependency-cruiser"
+            _sc_npm "ccusage"
+
+            # Claude Code
+            if ! command_exists "claude"; then
                 log_info "Installing claude..."
                 if command_exists "bun"; then
                     bun add -g @anthropic-ai/claude-code 2>/dev/null || log_warning "claude failed (bun)"
@@ -359,31 +476,40 @@ install_deps() {
                             sh "$claude_script" 2>/dev/null || log_warning "claude failed"
                         fi
                         rm -f "$claude_script"
-                        trap - EXIT INT TERM
+                        trap ':' EXIT INT TERM
                     fi
                 fi
-            }
+            fi
             ;;
 
         pacman)
             log_info "Using pacman package manager (Arch Linux)"
             local pacman_packages=("shellcheck" "ripgrep" "fzf" "bat" "trash-cli")
             for pkg in "${pacman_packages[@]}"; do
-                command_exists "$pkg" && log_success "$pkg installed" || {
+                if command_exists "$pkg"; then
+                    log_success "$pkg installed"
+                else
                     log_info "Installing $pkg..."
                     sudo pacman -S --noconfirm "$pkg" 2>/dev/null || log_warning "Failed: $pkg"
-                }
+                fi
             done
 
-            # Install additional tools via cargo if available
-            command_exists "eza" || { command_exists "cargo" && cargo install eza 2>/dev/null || log_warning "eza failed (requires cargo)"; }
+            # Tools via cargo
+            _sc_cargo "eza"
+            _sc_cargo "ast-grep" "ast-grep" "--locked"
+            _sc_cargo "sd"
+            _sc_cargo "scc"
+            _sc_cargo "difft" "difftastic"
+            _sc_uv "yq"
 
-            # Node.js tools via bun
-            command_exists "wrangler" || {
-                log_info "Installing wrangler..."
-                command_exists "bun" && bun add -g wrangler 2>/dev/null || npm install -g wrangler 2>/dev/null || log_warning "wrangler failed"
-            }
-            command_exists "claude" || {
+            # npm/bun global tools
+            _sc_npm "wrangler"
+            _sc_npm "jscpd"
+            _sc_npm "depcruise" "dependency-cruiser"
+            _sc_npm "ccusage"
+
+            # Claude Code
+            if ! command_exists "claude"; then
                 log_info "Installing claude..."
                 if command_exists "bun"; then
                     bun add -g @anthropic-ai/claude-code 2>/dev/null || log_warning "claude failed (bun)"
@@ -400,37 +526,46 @@ install_deps() {
                             sh "$claude_script" 2>/dev/null || log_warning "claude failed"
                         fi
                         rm -f "$claude_script"
-                        trap - EXIT INT TERM
+                        trap ':' EXIT INT TERM
                     fi
                 fi
-            }
+            fi
             ;;
 
         zypper)
             log_info "Using zypper package manager (openSUSE)"
-            local zypper_packages=("shellcheck" "ripgrep" "fzf" "bat")
+            local zypper_packages=("shellcheck" "ripgrep" "fzf" "bat" "jq" "watchexec")
             for pkg in "${zypper_packages[@]}"; do
-                command_exists "$pkg" && log_success "$pkg installed" || {
+                if command_exists "$pkg"; then
+                    log_success "$pkg installed"
+                else
                     log_info "Installing $pkg..."
                     sudo zypper install -y "$pkg" 2>/dev/null || log_warning "Failed: $pkg"
-                }
+                fi
             done
 
             # trash-cli
-            command_exists "trash" || {
+            if ! command_exists "trash"; then
                 log_info "Installing trash-cli..."
                 sudo zypper install -y trash-cli 2>/dev/null || log_warning "trash-cli failed"
-            }
+            fi
 
-            # Install additional tools via cargo if available
-            command_exists "eza" || { command_exists "cargo" && cargo install eza 2>/dev/null || log_warning "eza failed (requires cargo)"; }
+            # Tools via cargo
+            _sc_cargo "eza"
+            _sc_cargo "ast-grep" "ast-grep" "--locked"
+            _sc_cargo "sd"
+            _sc_cargo "scc"
+            _sc_cargo "difft" "difftastic"
+            _sc_uv "yq"
 
-            # Node.js tools via bun
-            command_exists "wrangler" || {
-                log_info "Installing wrangler..."
-                command_exists "bun" && bun add -g wrangler 2>/dev/null || npm install -g wrangler 2>/dev/null || log_warning "wrangler failed"
-            }
-            command_exists "claude" || {
+            # npm/bun global tools
+            _sc_npm "wrangler"
+            _sc_npm "jscpd"
+            _sc_npm "depcruise" "dependency-cruiser"
+            _sc_npm "ccusage"
+
+            # Claude Code
+            if ! command_exists "claude"; then
                 log_info "Installing claude..."
                 if command_exists "bun"; then
                     bun add -g @anthropic-ai/claude-code 2>/dev/null || log_warning "claude failed (bun)"
@@ -447,10 +582,10 @@ install_deps() {
                             sh "$claude_script" 2>/dev/null || log_warning "claude failed"
                         fi
                         rm -f "$claude_script"
-                        trap - EXIT INT TERM
+                        trap ':' EXIT INT TERM
                     fi
                 fi
-            }
+            fi
             ;;
 
         none)
@@ -467,7 +602,11 @@ install_deps() {
 
 setup_git() {
     log_step "Setting up Git hooks & secrets"
-    [[ -f "$SCRIPT_DIR/lib/git/setup.sh" ]] && bash "$SCRIPT_DIR/lib/git/setup.sh" install || log_warning "Git setup not found"
+    if [[ -f "$SCRIPT_DIR/lib/git/setup.sh" ]]; then
+        bash "$SCRIPT_DIR/lib/git/setup.sh" install
+    else
+        log_warning "Git setup not found"
+    fi
 }
 
 setup_phantom_guard() {
@@ -610,6 +749,9 @@ main() {
     echo "  🗑️  RM protection (PATH-based wrapper, trash, chflags helpers)"
     echo "  📁 Eza (modern ls) & GHLS"
     echo "  ☁️  Cloudflare CLI (wrangler) & Supabase CLI"
+    echo "  🤖 AI-dev tools: ast-grep, fd, sd, bat, difft, scc, jq, yq, watchexec"
+    echo "  🧹 Code quality: jscpd (dup detection), dependency-cruiser (circular deps)"
+    echo "  📊 Usage tracking: ccusage (Claude Code token monitoring)"
     echo "  👋 Welcome message"
     echo ""
     echo "💻 Commands:"
