@@ -122,7 +122,20 @@ welcome_message() {
     export WELCOME_MESSAGE_SHOWN=true
 }
 
-# Auto-run when sourced from shell RC file
+# Auto-run when sourced from shell RC file.
+# In zsh: defer to first precmd so .zshrc.local (plugins, etc.) is fully loaded first,
+# ensuring plugin active-state checks (✓ vs ⏳) are accurate. Self-removes after one run.
+# In bash or when WELCOME_MESSAGE_AUTORUN=false: run immediately.
 if [[ "${WELCOME_MESSAGE_AUTORUN:-true}" == "true" ]]; then
-    welcome_message
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+        autoload -Uz add-zsh-hook 2>/dev/null
+        _welcome_once_precmd() {
+            welcome_message
+            add-zsh-hook -d precmd _welcome_once_precmd 2>/dev/null
+            unset -f _welcome_once_precmd 2>/dev/null
+        }
+        add-zsh-hook precmd _welcome_once_precmd
+    else
+        welcome_message
+    fi
 fi
