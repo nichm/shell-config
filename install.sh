@@ -157,6 +157,22 @@ install_deps() {
                     log_info "Installing $_bt..."; brew install "$_bt" 2>/dev/null || log_warning "$_bt failed"
                 }
             done; unset _bt
+            # AI/agent workflow tools — improve Claude Code and coding agent efficiency
+            for _bt in ast-grep fd sd bat scc jq yq watchexec; do
+                command_exists "$_bt" && log_success "$_bt installed" || {
+                    log_info "Installing $_bt..."; brew install "$_bt" 2>/dev/null || log_warning "$_bt failed"
+                }
+            done; unset _bt
+            command_exists "difft" && log_success "difftastic installed" || { log_info "Installing difftastic..."; brew install difftastic 2>/dev/null || log_warning "difftastic failed"; }
+            for _npm in jscpd ccusage; do
+                command_exists "$_npm" && log_success "$_npm installed" || {
+                    log_info "Installing $_npm..."; command_exists "bun" && bun add -g "$_npm" 2>/dev/null || npm install -g "$_npm" 2>/dev/null || log_warning "$_npm failed"
+                }
+            done; unset _npm
+            command_exists "depcruise" && log_success "dependency-cruiser installed" || {
+                log_info "Installing dependency-cruiser..."
+                command_exists "bun" && bun add -g dependency-cruiser 2>/dev/null || npm install -g dependency-cruiser 2>/dev/null || log_warning "dependency-cruiser failed"
+            }
             # Opengrep: no brew; self-contained binary via official script (github.com/opengrep/opengrep)
             if ! command_exists "opengrep"; then
                 log_info "Installing opengrep..."
@@ -241,7 +257,7 @@ install_deps() {
             }
 
             # Core tools available via apt
-            local apt_packages=("shellcheck" "yamllint" "ripgrep" "fzf" "bat")
+            local apt_packages=("shellcheck" "yamllint" "ripgrep" "fzf" "bat" "jq")
             for pkg in "${apt_packages[@]}"; do
                 command_exists "$pkg" && log_success "$pkg installed" || {
                     log_info "Installing $pkg..."
@@ -289,6 +305,16 @@ install_deps() {
                         trap ':' EXIT INT TERM
                     fi
                 fi
+            }
+            # AI/agent workflow tools (npm — cross-platform)
+            for _npm in jscpd ccusage; do
+                command_exists "$_npm" && log_success "$_npm installed" || {
+                    log_info "Installing $_npm..."; command_exists "bun" && bun add -g "$_npm" 2>/dev/null || npm install -g "$_npm" 2>/dev/null || log_warning "$_npm failed"
+                }
+            done; unset _npm
+            command_exists "depcruise" && log_success "dependency-cruiser installed" || {
+                log_info "Installing dependency-cruiser..."
+                command_exists "bun" && bun add -g dependency-cruiser 2>/dev/null || npm install -g dependency-cruiser 2>/dev/null || log_warning "dependency-cruiser failed"
             }
             ;;
 
