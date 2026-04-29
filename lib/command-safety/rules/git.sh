@@ -231,7 +231,8 @@ _cs_match_merge_on_main() {
 _rule GIT_PUSH_MAIN cmd="git" \
     match_fn="_cs_match_push_to_main" \
     block="Direct push to main/master bypasses PR review — use a branch and PR" \
-    bypass="--force-push-main"
+    bypass="--force-push-main" \
+    exempt="--force-with-lease"
 
 _fix GIT_PUSH_MAIN \
     "gh pr create                    # Open a pull request from current branch" \

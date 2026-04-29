@@ -29,6 +29,7 @@ setup() {
 	git init -q
 	git config user.email "test@test.com"
 	git config user.name "Test"
+	git config core.hooksPath /dev/null
 	git commit -q --allow-empty -m "init"
 	# Ensure we're on main (older git defaults to master)
 	git checkout -q -B main 2>/dev/null || true
