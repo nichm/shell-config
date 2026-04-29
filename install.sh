@@ -652,6 +652,37 @@ EOF
     fi
 }
 
+deploy_claude_config() {
+    log_step "Deploying Claude Code agent configs"
+    local agents_src="$SCRIPT_DIR/config/claude/agents"
+    local agents_dst="$HOME/.claude/agents"
+    local cmds_src="$SCRIPT_DIR/config/claude/commands"
+    local cmds_dst="$HOME/.claude/commands"
+
+    _link_claude_dir() {
+        local src="$1" dst="$2" label="$3"
+        [[ -d "$src" ]] || return 0
+        mkdir -p "$dst"
+        local f name target
+        for f in "$src"/*.md; do
+            [[ -f "$f" ]] || continue
+            name=$(basename "$f"); target="$dst/$name"
+            if [[ -L "$target" && "$(readlink "$target")" == "$f" ]]; then
+                log_success "$label/$name already linked"
+            else
+                [[ -e "$target" ]] && rm -f "$target"
+                ln -s "$f" "$target" && log_success "Linked $label: $name"
+            fi
+        done
+    }
+
+    _link_claude_dir "$agents_src" "$agents_dst" "agent"
+    _link_claude_dir "$cmds_src"   "$cmds_dst"   "command"
+
+    echo ""
+    echo "  💡 Run /setup-claude-md in Claude Code to add tool preferences to ~/.claude/CLAUDE.md"
+}
+
 # =============================================================================
 # 7. MAKE SCRIPTS EXECUTABLE
 # =============================================================================
@@ -716,6 +747,7 @@ main() {
     echo ""
 
     symlink_config_files
+    deploy_claude_config
     if ! install_deps; then
         echo ""
         echo -e "${RED}❌ ERROR: Dependency installation failed${NC}" >&2
