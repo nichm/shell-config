@@ -50,6 +50,37 @@ _sc_get_managed_targets() {
 # SYMLINK CREATION
 # =============================================================================
 
+# Migrate [user] identity from an existing ~/.gitconfig into gitconfig.local.
+# Runs before symlinking so the user's name/email/signingkey survive the replacement.
+# Skips silently if gitconfig.local already has a [user] section.
+_sc_migrate_gitconfig_identity() {
+    local existing="$1"
+    local repo_gitconfig="$2"
+    local local_config
+    local_config="$(dirname "$repo_gitconfig")/gitconfig.local"
+
+    # Already has a [user] section — nothing to migrate
+    if [[ -f "$local_config" ]] && grep -q '^\[user\]' "$local_config"; then
+        return 0
+    fi
+
+    local name email signingkey
+    name=$(git config --file "$existing" user.name 2>/dev/null || true)
+    email=$(git config --file "$existing" user.email 2>/dev/null || true)
+    signingkey=$(git config --file "$existing" user.signingkey 2>/dev/null || true)
+
+    [[ -z "$name" && -z "$email" ]] && return 0
+
+    {
+        echo "[user]"
+        [[ -n "$name" ]]       && printf '\tname = %s\n' "$name"
+        [[ -n "$email" ]]      && printf '\temail = %s\n' "$email"
+        [[ -n "$signingkey" ]] && printf '\tsigningkey = %s\n' "$signingkey"
+    } >> "$local_config"
+
+    log_info "Migrated git identity to gitconfig.local (${name} <${email}>)"
+}
+
 # Create a single symlink with backup support
 # Usage: sc_symlink_create "/path/to/source" "/path/to/target"
 sc_symlink_create() {
@@ -77,6 +108,10 @@ sc_symlink_create() {
         fi
     # If target is a regular file, backup and replace
     elif [[ -f "$target" ]]; then
+        # For gitconfig: migrate [user] identity to gitconfig.local before replacing
+        if [[ "$target" == "${HOME}/.gitconfig" ]]; then
+            _sc_migrate_gitconfig_identity "$target" "$source"
+        fi
         local backup
         backup="$target.backup.$(date +%Y%m%d_%H%M%S)"
         mv "$target" "$backup"
