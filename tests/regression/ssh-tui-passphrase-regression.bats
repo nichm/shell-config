@@ -63,3 +63,21 @@ setup() {
     run grep -q "gh auth git-credential" "$gitconfig"
     [ "$status" -eq 0 ]
 }
+
+# --- gitconfig include: absolute path so symlink resolution works ---
+# Git resolves [include] path relative to the symlink location (~/) not the
+# real file location (~/.shell-config/config/). Relative "gitconfig.local"
+# silently fails. Must use the absolute ~/.shell-config/config/gitconfig.local.
+
+@test "gitconfig: include path is absolute (symlink-safe)" {
+    local gitconfig="$SHELL_CONFIG_DIR/config/gitconfig"
+    # Must NOT be the bare relative form that breaks when symlinked to ~/
+    run grep -q '^\s*path = gitconfig\.local$' "$gitconfig"
+    [ "$status" -ne 0 ]
+}
+
+@test "gitconfig: include path references shell-config directory" {
+    local gitconfig="$SHELL_CONFIG_DIR/config/gitconfig"
+    run grep -q 'path = .*shell-config.*gitconfig\.local' "$gitconfig"
+    [ "$status" -eq 0 ]
+}

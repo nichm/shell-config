@@ -52,4 +52,4 @@
 # See config/personal.env.example for setup instructions
 # =============================================================================
 [include]
-	path = gitconfig.local
+	path = ~/.shell-config/config/gitconfig.local
