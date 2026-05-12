@@ -1,395 +1,222 @@
-# SSH and Shell Setup Guide
+# SSH & Git Auth Setup Guide
 
-This document provides a complete setup guide for SSH keys, Git signing, and
-shell configuration for new computer setup, migrated from LastPass to native
-macOS keychain.
+Complete onboarding guide for SSH keys, git credentials, and shell auth on a new machine.
 
-## Prerequisites
+---
 
-- macOS system
-- Git installed
-- Homebrew installed (for additional tools if needed)
-
-## SSH Key Generation
-
-### 1. Generate SSH Keys for GitHub
+## TL;DR (new machine in 5 minutes)
 
 ```bash
-# Generate SSH key for GitHub authentication
-ssh-keygen -t ed25519 -C "your-username@users.noreply.github.com" -f ~/.ssh/id_ed25519_github
+# 1. Install shell-config
+git clone https://github.com/nichm/shell-config.git ~/shell-config
+cd ~/shell-config && ./install.sh && source ~/.zshrc
 
-# Generate SSH key for Git signing
-ssh-keygen -t ed25519 -C "your-username@users.noreply.github.com" -f ~/.ssh/id_ed25519_github_signing
+# 2. Generate an SSH key (skip if migrating an existing key)
+ssh-keygen -t ed25519 -C "you@example.com" -f ~/.ssh/id_ed25519
+
+# 3. Store passphrase in macOS Keychain (one-time, survives reboots)
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+
+# 4. Auth git with GitHub CLI (no SSH needed for git ops)
+gh auth login   # choose HTTPS, then browser
+
+# 5. Add public key to GitHub if doing SSH git ops
+cat ~/.ssh/id_ed25519.pub | pbcopy
+# → github.com/settings/keys → New SSH Key
 ```
 
-### 2. Set Proper Permissions
+After that: open a new terminal and run `ssh-add -l` — your key should be listed. The shell's SSH loader auto-runs `ssh-add --apple-load-keychain` at every startup.
+
+---
+
+## Auth Modes
+
+### Mode A — macOS Keychain (default, recommended)
+
+The system launchd SSH agent (`SSH_AUTH_SOCK`) plus macOS Keychain.
+
+Requirements in `~/.ssh/config` (`Host *` block):
+```
+AddKeysToAgent yes
+UseKeychain yes
+```
+Both are in the `ssh-config.example` template by default.
+
+The shell's `lib/core/loaders/ssh.sh` runs `ssh-add --apple-load-keychain` at every shell startup — keys pre-load silently, no passphrase prompt, ever.
+
+### Mode B — 1Password SSH Agent
+
+Uncomment the `IdentityAgent` line in `~/.ssh/config`:
+```
+Host *
+    IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+    AddKeysToAgent yes
+    UseKeychain yes    # ← keep this as fallback
+```
+
+Set `SHELL_CONFIG_1PASSWORD_SSH=false` in `~/.zshrc.local` to skip the 1Password socket check if you're NOT using it (silences the fallback warning).
+
+---
+
+## git Credential Auth
+
+**Use gh CLI for GitHub — not SSH keys.** SSH is for server access. For git push/pull, gh CLI handles HTTPS auth with a token that never expires or needs agent management.
+
+### gh CLI setup
 
 ```bash
-chmod 600 ~/.ssh/id_ed25519_github
-chmod 600 ~/.ssh/id_ed25519_github_signing
-chmod 644 ~/.ssh/id_ed25519_github.pub
-chmod 644 ~/.ssh/id_ed25519_github_signing.pub
+gh auth login   # choose HTTPS + browser auth
 ```
 
-## SSH Configuration
+### Wire it to git
 
-### 1. Create SSH Config File
+Add to `config/gitconfig.local` (gitignored, machine-local):
 
-Create `~/.ssh/config` with the following content:
-
-```ssh-config
-Host github.com
- HostName github.com
- User git
- IdentityFile ~/.ssh/id_ed25519_github
- IdentityFile ~/.ssh/id_ed25519_github_signing
- AddKeysToAgent yes
- UseKeychain yes
- IdentitiesOnly yes
+```ini
+[credential "https://github.com"]
+    helper =
+    helper = !/opt/homebrew/bin/gh auth git-credential
 ```
 
-### 2. Create Allowed Signers File
+This overrides the default `osxkeychain` helper for GitHub. The `helper =` (empty) line clears any prior helper so they don't chain unexpectedly.
 
-Create `~/.ssh/allowed_signers` with your public key:
-
-```
-your-username@users.noreply.github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI[YOUR_ACTUAL_KEY_DATA_HERE] your-username@users.noreply.github.com
-```
-
-**Note**: Replace `[YOUR_ACTUAL_KEY_DATA_HERE]` with the actual key data from
-your `id_ed25519_github_signing.pub` file.
-
-## Git Configuration
-
-### 1. Configure Git User Information
-
+Verify it works:
 ```bash
-git config --global user.name "Your Name"
-git config --global user.email "your-username@users.noreply.github.com"
-```
-
-### 2. Configure Git Signing
-
-```bash
-# Set signing key
-git config --global user.signingkey ~/.ssh/id_ed25519_github_signing.pub
-
-# Enable SSH signing
-git config --global gpg.format ssh
-
-# Enable commit signing
-git config --global commit.gpgsign true
-
-# Set allowed signers file
-git config --global gpg.ssh.allowedsignersfile ~/.ssh/allowed_signers
-```
-
-### 3. Configure Git Settings
-
-```bash
-# Set credential helper for macOS
-git config --global credential.helper osxkeychain
-
-# Set pull behavior
-git config --global pull.rebase false
-
-# Enable Git LFS if needed
-git config --global filter.lfs.clean "git-lfs clean -- %f"
-git config --global filter.lfs.smudge "git-lfs smudge -- %f"
-git config --global filter.lfs.process "git-lfs filter-process"
-git config --global filter.lfs.required true
-```
-
-## Shell Configuration (zsh)
-
-### 1. Update ~/.zshrc
-
-Add the following SSH agent configuration to `~/.zshrc`:
-
-```bash
-# SSH agent configuration with keychain support
-# Set environment variable to suppress deprecated flag warnings
-export APPLE_SSH_ADD_BEHAVIOR=macos
-
-# Load SSH keys from keychain on shell startup
-ssh-add --apple-load-keychain 2>/dev/null
-
-# If no keys are loaded, add them to keychain
-if [ $(ssh-add -l 2>/dev/null | wc -l) -eq 0 ]; then
-  ssh-add --apple-use-keychain ~/.ssh/id_ed25519_github_signing 2>/dev/null
-  ssh-add --apple-use-keychain ~/.ssh/id_ed25519_github 2>/dev/null
-fi
-```
-
-### 2. pnpm Configuration (if using pnpm)
-
-Also add to `~/.zshrc`:
-
-```bash
-# pnpm
-export PNPM_HOME="$HOME/Library/pnpm"
-case ":$PATH:" in
-  *":$PNPM_HOME:"*) ;;
-  *) export PATH="$PNPM_HOME:$PATH" ;;
-esac
-# pnpm end
-
-# Add ~/bin to PATH for custom scripts
-export PATH="$HOME/bin:$PATH"
-
-# pnpm aliases and shortcuts for improved productivity
-alias pn="pnpm"
-alias pni="pnpm install"
-alias pna="pnpm add"
-alias pnad="pnpm add -D"
-alias pnr="pnpm remove"
-alias pnx="pnpm dlx"
-alias pnc="pnpm create"
-alias pndev="pnpm run dev"
-alias pnbuild="pnpm run build"
-alias pnstart="pnpm run start"
-alias pntest="pnpm run test"
-alias pnlint="pnpm run lint"
-alias pnformat="pnpm run format"
-alias pntype="pnpm run typecheck"
-alias pnup="pnpm update"
-alias pnaudit="pnpm audit"
-alias pnls="pnpm list"
-alias pnwhy="pnpm why"
-alias pnoutdated="pnpm outdated"
-alias pnpatch="pnpm patch"
-
-# pnpm workspace shortcuts
-alias pnw="pnpm -w"
-alias pnwi="pnpm -w install"
-alias pnwr="pnpm -w run"
-alias pnwx="pnpm -w dlx"
-
-# Quick project setup with pnpm
-alias pninit="pnpm init && echo 'packageManager: pnpm@10.12.4' >> package.json"
-
-# pnpm store and cache management
-alias pnstore="pnpm store status"
-alias pnprune="pnpm store prune"
-alias pncache="pnpm store path"
-```
-
-### 3. Node.js Version Management (fnm)
-
-If using fnm for Node.js version management:
-
-```bash
-# fnm
-FNM_PATH="$HOME/Library/Application Support/fnm"
-if [ -d "$FNM_PATH" ]; then
-  export PATH="$FNM_PATH:$PATH"
-  eval "`fnm env`"
-fi
-```
-
-## GitHub Setup
-
-### 1. Add SSH Keys to GitHub
-
-1. Copy your public keys:
-
-   ```bash
-   # Copy authentication key
-   cat ~/.ssh/id_ed25519_github.pub
-
-   # Copy signing key
-   cat ~/.ssh/id_ed25519_github_signing.pub
-   ```
-
-2. Add both keys to GitHub:
-   - Go to GitHub Settings > SSH and GPG keys
-   - Add `id_ed25519_github.pub` as an "Authentication Key"
-   - Add `id_ed25519_github_signing.pub` as a "Signing Key"
-
-### 2. Test SSH Connection
-
-```bash
-ssh -T git@github.com
-```
-
-Expected output:
-
-```
-Hi your-username! You've successfully authenticated, but GitHub does not provide shell access.
-```
-
-## Testing Setup
-
-### 1. Test SSH Key Loading
-
-```bash
-# Check if keys are loaded
-ssh-add -l
-
-# Expected output shows both keys loaded
-```
-
-### 2. Test Git Signing
-
-```bash
-# Create test repository
-cd /tmp
-git init test-signing
-cd test-signing
-
-# Create test commit
-echo "test" > test.txt
-git add test.txt
-git commit -m "Test commit for signing"
-
-# Verify signature
-git log --show-signature --oneline
-```
-
-Expected output should show "Good 'git' signature" for the commit.
-
-### 3. Test GitHub Connection
-
-```bash
-# Test clone with SSH
-git clone git@github.com:your-username/test-repo.git
-
-# Test push with signing
-# (commits should be automatically signed)
-```
-
-## Password Behavior
-
-### When SSH Keys Will Ask for Passwords
-
-1. **After System Restart**: You'll be prompted for your SSH key passphrase
-   **once per restart** when you first use either key.
-
-2. **After Keychain Lock**: If your macOS keychain gets locked due to security
-   settings or inactivity, you may be prompted again.
-
-3. **New Terminal Sessions**: With proper configuration, new terminal sessions
-   automatically load keys from keychain - **no password prompts**.
-
-### Expected Behavior
-
-- **System restart**: Enter passphrase once when first using Git/SSH
-- **New terminal**: Keys automatically loaded from keychain
-- **Git operations**: Work without prompting
-- **Git signing**: Works without prompting
-
-## Troubleshooting
-
-### SSH Agent Not Working
-
-If SSH agent issues occur:
-
-```bash
-# Check if SSH agent is running
-ps aux | grep ssh-agent
-
-# Restart SSH agent if needed
-killall ssh-agent
-ssh-add --apple-load-keychain
-```
-
-### Keys Not Loading Automatically
-
-If keys don't load automatically:
-
-```bash
-# Manually add keys to keychain
-ssh-add --apple-use-keychain ~/.ssh/id_ed25519_github_signing
-ssh-add --apple-use-keychain ~/.ssh/id_ed25519_github
-
-# Check if keys are loaded
-ssh-add -l
-```
-
-### Git Signing Not Working
-
-If Git signing fails:
-
-```bash
-# Check Git configuration
-git config --global --list | grep -E "(signing|gpg|commit)"
-
-# Test signing manually
-git commit -S -m "Test signed commit"
-```
-
-### Permission Errors
-
-If you encounter permission errors:
-
-```bash
-# Fix SSH directory permissions
-chmod 700 ~/.ssh
-chmod 600 ~/.ssh/id_ed25519_*
-chmod 644 ~/.ssh/id_ed25519_*.pub
-chmod 600 ~/.ssh/config
-```
-
-## Security Notes
-
-1. **Never share private keys**: Only share `.pub` files
-2. **Use strong passphrases**: Protect your private keys with strong passphrases
-3. **Regular key rotation**: Consider rotating keys periodically
-4. **Backup keys**: Keep secure backups of your private keys
-5. **1Password removed**: Native macOS keychain is used instead of 1Password CLI
-
-## File Locations Summary
-
-```
-~/.ssh/id_ed25519_github          # Private authentication key
-~/.ssh/id_ed25519_github.pub      # Public authentication key
-~/.ssh/id_ed25519_github_signing  # Private signing key
-~/.ssh/id_ed25519_github_signing.pub  # Public signing key
-~/.ssh/config                     # SSH configuration
-~/.ssh/allowed_signers            # Git signing allowed signers
-~/.zshrc                          # Shell configuration
-```
-
-## Quick Setup Script
-
-For automated setup on a new machine:
-
-```bash
-#!/bin/bash
-# Quick SSH setup script
-
-# Generate keys
-ssh-keygen -t ed25519 -C "your-username@users.noreply.github.com" -f ~/.ssh/id_ed25519_github
-ssh-keygen -t ed25519 -C "your-username@users.noreply.github.com" -f ~/.ssh/id_ed25519_github_signing
-
-# Set permissions
-chmod 600 ~/.ssh/id_ed25519_github
-chmod 600 ~/.ssh/id_ed25519_github_signing
-chmod 644 ~/.ssh/id_ed25519_github.pub
-chmod 644 ~/.ssh/id_ed25519_github_signing.pub
-
-# Add to keychain
-ssh-add --apple-use-keychain ~/.ssh/id_ed25519_github_signing
-ssh-add --apple-use-keychain ~/.ssh/id_ed25519_github
-
-# Configure Git
-git config --global user.name "Your Name"
-git config --global user.email "your-username@users.noreply.github.com"
-git config --global user.signingkey ~/.ssh/id_ed25519_github_signing.pub
-git config --global gpg.format ssh
-git config --global commit.gpgsign true
-git config --global gpg.ssh.allowedsignersfile ~/.ssh/allowed_signers
-git config --global credential.helper osxkeychain
-git config --global pull.rebase false
-
-echo "Setup complete! Don't forget to:"
-echo "1. Add SSH keys to GitHub"
-echo "2. Create ~/.ssh/config file"
-echo "3. Create ~/.ssh/allowed_signers file"
-echo "4. Update ~/.zshrc with SSH agent configuration"
+git config --list | grep credential
+# Should show: credential.https://github.com.helper=!/opt/homebrew/bin/gh auth git-credential
 ```
 
 ---
 
-*Last updated: July 16, 2025* *This guide is part of the development environment
-documentation.*
+## Why `UseKeychain yes` matters for TUI tools
+
+**The bug:** Claude Code, vim, and other TUI tools take over the terminal. If their git subprocesses trigger an SSH operation and the agent is empty, SSH outputs a raw passphrase prompt to the terminal. This interleaves with the TUI rendering and corrupts the display.
+
+**The fix has two parts:**
+1. `UseKeychain yes` in `~/.ssh/config` — tells SSH to consult Keychain automatically
+2. `ssh-add --apple-load-keychain` in `lib/core/loaders/ssh.sh` — pre-loads all Keychain keys at every shell startup so the agent is never empty
+
+Together these mean: agent is populated at shell start → no passphrase prompts → TUI tools work cleanly.
+
+---
+
+## SSH Key Setup (full)
+
+### Generate keys
+
+```bash
+# One key for everything (simpler)
+ssh-keygen -t ed25519 -C "you@example.com" -f ~/.ssh/id_ed25519
+
+# Optional: separate signing key (for git commit signing)
+ssh-keygen -t ed25519 -C "you@example.com" -f ~/.ssh/id_ed25519_signing
+```
+
+### Permissions
+
+```bash
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_ed25519_signing 2>/dev/null || true
+chmod 644 ~/.ssh/id_ed25519.pub ~/.ssh/id_ed25519_signing.pub 2>/dev/null || true
+chmod 600 ~/.ssh/config
+```
+
+### Store passphrase in Keychain
+
+```bash
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+# If you have a signing key:
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519_signing
+```
+
+### Add public key to GitHub
+
+```bash
+cat ~/.ssh/id_ed25519.pub | pbcopy
+# → github.com/settings/keys → New SSH Key → Authentication Key
+
+# If using commit signing:
+cat ~/.ssh/id_ed25519_signing.pub | pbcopy
+# → github.com/settings/keys → New SSH Key → Signing Key
+```
+
+---
+
+## git Commit Signing (optional)
+
+If you want signed commits (green "Verified" badge on GitHub):
+
+```bash
+# Add to config/gitconfig.local:
+[user]
+    signingkey = ~/.ssh/id_ed25519_signing.pub
+[gpg]
+    format = ssh
+[commit]
+    gpgsign = true
+[gpg "ssh"]
+    allowedSignersFile = ~/.ssh/allowed_signers
+```
+
+Create the allowed signers file:
+```bash
+echo "you@example.com $(cat ~/.ssh/id_ed25519_signing.pub)" > ~/.ssh/allowed_signers
+```
+
+Verify a signed commit:
+```bash
+git log --show-signature -1
+# Should show: Good "git" signature
+```
+
+---
+
+## Troubleshooting
+
+### Agent is empty after shell start
+
+```bash
+ssh-add -l        # should list identities
+# If empty:
+ssh-add --apple-load-keychain   # manually trigger
+# If "no identities" after that, the key isn't in Keychain yet:
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519   # store it once
+```
+
+### Passphrase prompt appearing in Claude Code / vim
+
+Root cause: agent is empty. Run `ssh-add --apple-load-keychain` and open a fresh shell. If it keeps happening, check `~/.ssh/config` has `UseKeychain yes`.
+
+### gh credential helper not working
+
+```bash
+gh auth status     # should show "Logged in" and HTTPS protocol
+git config --list | grep credential   # verify helper is configured
+```
+
+If `git push` still prompts, the credential chain might be picking up `osxkeychain` first. Make sure `gitconfig.local` has the empty `helper =` line before the gh line.
+
+### SSH to GitHub failing
+
+```bash
+ssh -Tv git@github.com 2>&1 | head -30
+# Look for: "Hi username! You've successfully authenticated"
+```
+
+---
+
+## File Reference
+
+| File | Location | Tracked |
+|------|----------|---------|
+| SSH private key | `~/.ssh/id_ed25519` | No — never commit |
+| SSH public key | `~/.ssh/id_ed25519.pub` | No |
+| SSH config | `~/.ssh/config` → `~/.shell-config/config/ssh-config` | No (gitignored) |
+| SSH config example | `config/ssh-config.example` | Yes |
+| git config | `~/.gitconfig` → `~/.shell-config/config/gitconfig` | Yes (template) |
+| git config local | `~/.shell-config/config/gitconfig.local` | No (gitignored) |
+| SSH loader | `lib/core/loaders/ssh.sh` | Yes |
+
+---
+
+*Last updated: 2026-05-12*

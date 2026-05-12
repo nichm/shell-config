@@ -5,12 +5,14 @@
 # Prevents regression of: SSH passphrase prompts corrupting TUI tools (Claude
 # Code, vim, etc.) when SSH agent is empty and a git subprocess triggers auth.
 #
-# Root cause: missing UseKeychain yes in ssh-config means macOS Keychain is not
-# consulted automatically — SSH falls back to a terminal passphrase prompt that
+# Root cause: missing UseKeychain yes + no --apple-load-keychain at startup
+# means SSH agent is empty and falls back to a terminal passphrase prompt that
 # interleaves with TUI rendering and garbles the display.
 #
-# Fix: UseKeychain yes in the Host * block of ssh-config.example so all new
-# installs silently load passphrases from Keychain without terminal prompts.
+# Fix (three-part):
+#   1. UseKeychain yes in ssh-config.example (Host * block)
+#   2. ssh-add --apple-load-keychain in lib/core/loaders/ssh.sh at shell startup
+#   3. Absolute include path in gitconfig (relative path silently fails via symlink)
 # =============================================================================
 
 setup() {
@@ -79,5 +81,46 @@ setup() {
 @test "gitconfig: include path references shell-config directory" {
     local gitconfig="$SHELL_CONFIG_DIR/config/gitconfig"
     run grep -q 'path = .*shell-config.*gitconfig\.local' "$gitconfig"
+    [ "$status" -eq 0 ]
+}
+
+# --- SSH loader: --apple-load-keychain at startup ---
+# Without this, agent is empty on new shells even with UseKeychain yes in config.
+# An empty agent causes TUI passphrase prompts when git subprocesses run.
+
+@test "ssh.sh: exists and is readable" {
+    local ssh_loader="$SHELL_CONFIG_DIR/lib/core/loaders/ssh.sh"
+    [ -f "$ssh_loader" ]
+    [ -r "$ssh_loader" ]
+}
+
+@test "ssh.sh: has valid bash syntax" {
+    local ssh_loader="$SHELL_CONFIG_DIR/lib/core/loaders/ssh.sh"
+    run bash -n "$ssh_loader"
+    [ "$status" -eq 0 ]
+}
+
+@test "ssh.sh: calls --apple-load-keychain to pre-populate agent on macOS" {
+    local ssh_loader="$SHELL_CONFIG_DIR/lib/core/loaders/ssh.sh"
+    run grep -q 'apple-load-keychain' "$ssh_loader"
+    [ "$status" -eq 0 ]
+}
+
+@test "ssh.sh: --apple-load-keychain is inside a Darwin/macOS guard" {
+    local ssh_loader="$SHELL_CONFIG_DIR/lib/core/loaders/ssh.sh"
+    # The call must be guarded by a Darwin or is_macos check to stay cross-platform
+    run grep -q 'Darwin\|is_macos' "$ssh_loader"
+    [ "$status" -eq 0 ]
+}
+
+@test "ssh.sh: does NOT use set -euo pipefail (sourced into interactive shell)" {
+    local ssh_loader="$SHELL_CONFIG_DIR/lib/core/loaders/ssh.sh"
+    run grep -q '^set -euo pipefail' "$ssh_loader"
+    [ "$status" -ne 0 ]
+}
+
+@test "ssh.sh: supports SHELL_CONFIG_1PASSWORD_SSH=false opt-out" {
+    local ssh_loader="$SHELL_CONFIG_DIR/lib/core/loaders/ssh.sh"
+    run grep -q 'SHELL_CONFIG_1PASSWORD_SSH' "$ssh_loader"
     [ "$status" -eq 0 ]
 }

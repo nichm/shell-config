@@ -6,39 +6,53 @@ Include ~/.orbstack/ssh/config
 # =============================================================================
 # LOCAL SERVER CONFIG (gitignored — add your servers in ssh-config.local)
 # =============================================================================
-# IMPORTANT: Include MUST be before any Host blocks to apply globally.
+# IMPORTANT: Include directives MUST be before any Host blocks to apply globally.
 # Create config/ssh-config.local with your Host blocks.
 # See config/personal.env.example for setup instructions.
 # Example:
 #   Host my-vps
 #       HostName your-vps-ip
 #       User root
-#       IdentityFile ~/.ssh/my_vps.pub
+#       IdentityFile ~/.ssh/id_ed25519
 #       IdentitiesOnly yes
 # =============================================================================
 Include ~/.shell-config/config/ssh-config.local
 
 # =============================================================================
-# SSH Client Configuration - 1Password SSH Agent
+# SSH Client Configuration
+# =============================================================================
+# Choose ONE of the two auth modes below. Remove or comment out the other.
+#
+# MODE A — 1Password SSH Agent (recommended if you use 1Password)
+#   1Password manages keys via its GUI. The IdentityAgent line routes SSH
+#   through 1Password's socket. No terminal passphrase prompts.
+#
+# MODE B — macOS Keychain (recommended otherwise)
+#   Keys stored in macOS Keychain. UseKeychain yes + AddKeysToAgent yes
+#   ensures silent auto-load. The init.sh SSH loader runs
+#   `ssh-add --apple-load-keychain` on shell startup so the agent is
+#   never empty — prevents passphrase prompts in TUI tools (Claude Code, etc.)
+#
+# Either way: run `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` once
+# to store your passphrase in the Keychain.
 # =============================================================================
 
-# Default: 1Password SSH Agent for all hosts
-# UseKeychain yes: auto-loads passphrases from macOS Keychain — prevents terminal
-# passphrase prompts in TUI tools (Claude Code, vim, etc.) if 1Password is absent/disabled
+# --- MODE A: 1Password SSH Agent ---
+# Uncomment IdentityAgent line to activate. Comment it out for Mode B.
 Host *
-    IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+    # IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
     AddKeysToAgent yes
     UseKeychain yes
-    # Performance optimizations
     ServerAliveInterval 60
     ServerAliveCountMax 3
     Compression yes
-    # Disable GSSAPI (can cause slowdowns)
     GSSAPIAuthentication no
 
-# GitHub - use specific key to avoid "too many auth failures"
+# GitHub — HTTPS via gh CLI is preferred; SSH kept for compatibility
+# For HTTPS auth, configure gitconfig.local with the gh credential helper:
+#   [credential "https://github.com"]
+#       helper =
+#       helper = !/opt/homebrew/bin/gh auth git-credential
 Host github.com
     HostName github.com
     User git
-    IdentityFile ~/.ssh/github.pub
-    IdentitiesOnly yes
