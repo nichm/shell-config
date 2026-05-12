@@ -22,10 +22,13 @@ Include ~/.shell-config/config/ssh-config.local
 # SSH Client Configuration - 1Password SSH Agent
 # =============================================================================
 
-# Default: Use 1Password SSH Agent for all hosts
+# Default: 1Password SSH Agent for all hosts
+# UseKeychain yes: auto-loads passphrases from macOS Keychain — prevents terminal
+# passphrase prompts in TUI tools (Claude Code, vim, etc.) if 1Password is absent/disabled
 Host *
     IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
     AddKeysToAgent yes
+    UseKeychain yes
     # Performance optimizations
     ServerAliveInterval 60
     ServerAliveCountMax 3
