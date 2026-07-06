@@ -30,11 +30,21 @@
 # where set -e would cause the shell to exit on any command failure.
 
 # Get script directory (bash/zsh compatible)
-if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+# Prefer SHELL_CONFIG_DIR (exported by init.sh) since $0/BASH_SOURCE are
+# unreliable under some shell integrations (e.g. $0="--" resolves to CWD).
+if [[ -n "${SHELL_CONFIG_DIR:-}" ]]; then
+    _GIT_WRAPPER_DIR="$SHELL_CONFIG_DIR/lib/git"
+elif [[ -n "${BASH_SOURCE[0]:-}" ]]; then
     _GIT_WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 elif [[ -n "${ZSH_VERSION:-}" ]]; then
     _GIT_WRAPPER_DIR="${0:A:h}"
 else
+    _GIT_WRAPPER_DIR="${HOME}/.shell-config/lib/git"
+fi
+
+# Validate detection: this dir must contain the command parser we source below.
+# If it's empty or wrong, fall back to the canonical install location.
+if [[ -z "$_GIT_WRAPPER_DIR" || ! -f "$_GIT_WRAPPER_DIR/shared/command-parser.sh" ]]; then
     _GIT_WRAPPER_DIR="${HOME}/.shell-config/lib/git"
 fi
 
@@ -63,6 +73,14 @@ source "$_GIT_WRAPPER_DIR/shared/audit-logging.sh"
 _GIT_WRAPPER_HEAVY_LOADED=0
 _git_wrapper_load_heavy() {
     [[ $_GIT_WRAPPER_HEAVY_LOADED -eq 1 ]] && return 0
+
+    # Re-validate the wrapper dir at load time: if it's empty or missing the
+    # shared modules (e.g. detected from an unreliable $0), fall back to the
+    # canonical install location so heavy modules always load.
+    if [[ -z "${_GIT_WRAPPER_DIR:-}" || ! -f "$_GIT_WRAPPER_DIR/shared/safety-checks.sh" ]]; then
+        _GIT_WRAPPER_DIR="${SHELL_CONFIG_DIR:-$HOME/.shell-config}/lib/git"
+    fi
+
     _GIT_WRAPPER_HEAVY_LOADED=1
 
     # Syntax validator

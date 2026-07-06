@@ -13,6 +13,10 @@ else
 fi
 
 # Get script directory (bash/zsh compatible)
+# NOTE: Some shell integrations (e.g. editor terminals) start zsh with $0="--",
+# which makes ${0:A:h} resolve to the CWD instead of this file's directory. We
+# therefore VALIDATE the detected directory below and fall back to the canonical
+# install location if it doesn't actually contain shell-config.
 if [[ -n "$ZSH_VERSION" ]]; then
     SHELL_CONFIG_DIR="${0:A:h}"
 elif [[ -n "$BASH_VERSION" ]]; then
@@ -21,6 +25,17 @@ else
     # Fallback to symlink location
     SHELL_CONFIG_DIR="$HOME/.shell-config"
 fi
+
+# Validate detection: the real dir must contain the core config module. If the
+# detected path is empty or wrong (e.g. $0="--" resolved to CWD), fall back to
+# the canonical install location so all downstream sourcing works.
+if [[ -z "$SHELL_CONFIG_DIR" || ! -f "$SHELL_CONFIG_DIR/lib/core/config.sh" ]]; then
+    SHELL_CONFIG_DIR="$HOME/.shell-config"
+fi
+
+# Export so lazily-loaded modules (e.g. the git wrapper's heavy path) can always
+# locate their dependencies regardless of $0/BASH_SOURCE reliability.
+export SHELL_CONFIG_DIR
 
 # Load configuration (env vars > YAML > simple config > defaults)
 [[ -f "$SHELL_CONFIG_DIR/lib/core/config.sh" ]] && source "$SHELL_CONFIG_DIR/lib/core/config.sh"

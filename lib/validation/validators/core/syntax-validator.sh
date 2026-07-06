@@ -12,31 +12,31 @@ readonly _SYNTAX_VALIDATOR_LOADED=1
 # Ensure command_exists is available (sourced via init.sh/hook-bootstrap chain)
 declare -f command_exists &>/dev/null || command_exists() { command -v "$1" >/dev/null 2>&1; }
 
+# Resolve the validation "shared" directory directly (avoids fragile ../ math).
+# Order: explicit env dirs > BASH_SOURCE-derived > canonical fallback. Each
+# candidate is then validated below, so an unreliable $0/BASH_SOURCE can't break
+# sourcing.
 if [[ -n "${VALIDATION_LIB_DIR:-}" ]]; then
-    _SYNTAX_VALIDATOR_DIR="$VALIDATION_LIB_DIR"
+    _SYNTAX_SHARED_DIR="$VALIDATION_LIB_DIR/shared"
 elif [[ -n "${SHELL_CONFIG_DIR:-}" ]]; then
-    _SYNTAX_VALIDATOR_DIR="$SHELL_CONFIG_DIR/lib/validation"
+    _SYNTAX_SHARED_DIR="$SHELL_CONFIG_DIR/lib/validation/shared"
 elif [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-    _SYNTAX_VALIDATOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    # This file lives at .../lib/validation/validators/core/, so shared is ../../shared
+    _SYNTAX_SHARED_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../shared" 2>/dev/null && pwd)"
 else
-    _SYNTAX_VALIDATOR_DIR="${HOME}/.shell-config/lib/validation"
+    _SYNTAX_SHARED_DIR="${HOME}/.shell-config/lib/validation/shared"
+fi
+
+# Validate: the shared dir must contain file-operations.sh. If not, fall back to
+# the canonical install location.
+if [[ -z "$_SYNTAX_SHARED_DIR" || ! -f "$_SYNTAX_SHARED_DIR/file-operations.sh" ]]; then
+    _SYNTAX_SHARED_DIR="${HOME}/.shell-config/lib/validation/shared"
 fi
 
 # shellcheck source=../../shared/file-operations.sh
-# Source shared utilities - path depends on how _SYNTAX_VALIDATOR_DIR was set
-# When using BASH_SOURCE, DIR = validators/, so need ../shared/
-# When using SHELL_CONFIG_DIR, DIR = validation/, so need shared/
-if [[ -n "${VALIDATION_LIB_DIR:-}" ]]; then
-    source "$_SYNTAX_VALIDATOR_DIR/shared/file-operations.sh"
-    source "$_SYNTAX_VALIDATOR_DIR/shared/reporters.sh"
-elif [[ -n "${SHELL_CONFIG_DIR:-}" ]]; then
-    source "$_SYNTAX_VALIDATOR_DIR/shared/file-operations.sh"
-    source "$_SYNTAX_VALIDATOR_DIR/shared/reporters.sh"
-else
-    # BASH_SOURCE path - validators/ dir, need to go up
-    source "$_SYNTAX_VALIDATOR_DIR/../shared/file-operations.sh"
-    source "$_SYNTAX_VALIDATOR_DIR/../shared/reporters.sh"
-fi
+source "$_SYNTAX_SHARED_DIR/file-operations.sh"
+# shellcheck source=../../shared/reporters.sh
+source "$_SYNTAX_SHARED_DIR/reporters.sh"
 
 _SYNTAX_VERBOSE="${VALIDATION_VERBOSE:-0}"
 
