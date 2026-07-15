@@ -45,6 +45,12 @@ setup() {
 	[[ "$output" == *"yamllint"* ]]
 }
 
+@test "_get_validators_for_file returns jq for .json files" {
+	run bash -c "source '$SYNTAX_LIB' && _get_validators_for_file 'test.json'"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"jq"* ]]
+}
+
 @test "_get_validators_for_file returns actionlint for GitHub workflow files" {
 	run bash -c "source '$SYNTAX_LIB' && _get_validators_for_file '.github/workflows/test.yml'"
 	[ "$status" -eq 0 ]

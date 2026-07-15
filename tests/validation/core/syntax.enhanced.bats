@@ -85,7 +85,7 @@ teardown() {
 @test "_get_validators_for_file maps JSON files correctly" {
 	run _get_validators_for_file test.json
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"biome"* ]] || [[ "$output" == *"oxlint"* ]]
+	[[ "$output" == *"jq"* ]]
 }
 
 @test "_get_validators_for_file maps GitHub Actions workflows correctly" {
@@ -453,4 +453,40 @@ teardown() {
 
 	# Cleanup
 	chmod 644 test.txt
+}
+
+# =============================================================================
+# 🐛 FALSE-POSITIVE REGRESSION TESTS (oxlint JSON + zsh reporting)
+# =============================================================================
+
+@test "_is_ignorable_validator_output treats oxlint no-files as skip" {
+	run _is_ignorable_validator_output oxlint "No files found to lint. Please check your paths."
+	[ "$status" -eq 0 ]
+}
+
+@test "validate_staged_syntax accepts valid package.json and TypeScript" {
+	if ! command -v jq >/dev/null 2>&1; then
+		skip "jq not installed"
+	fi
+	if ! command -v oxlint >/dev/null 2>&1; then
+		skip "oxlint not installed"
+	fi
+
+	echo '{"name":"syntax-test"}' >package.json
+	echo 'export const ok = 1;' >ok.ts
+	git add package.json ok.ts
+
+	run validate_staged_syntax
+	[ "$status" -eq 0 ]
+
+	run syntax_validator_show_errors
+	[ "$status" -eq 0 ]
+}
+
+@test "syntax_validator_show_errors does not crash with indexed errors" {
+	_SYNTAX_ERRORS=("file-a.ts" "file-b.json")
+	_SYNTAX_ERROR_DETAILS=("line 1" "line 2")
+	run syntax_validator_show_errors
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"file-a.ts"* ]]
 }
